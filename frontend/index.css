@@ -1,11 +1,50 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap');
+
+:root {
+    font-family: 'Space Grotesk', system-ui, sans-serif;
+    line-height: 1.5;
+    font-weight: 500;
+
+    color: #2d2a4a;
+    background-color: #faf5eb;
+
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
 html, body {
     margin: 0;
     padding: 0;
     height: 100%;
+    min-width: 320px;
+}
+
+a {
+    font-weight: 600;
+    color: #e85d4c;
+    text-decoration: none;
+}
+
+a:hover {
+    color: #c94a3a;
+}
+
+h1, h2, h3 {
+    font-weight: 700;
+    color: #2d2a4a;
+}
+
+button {
+    font-family: 'Space Grotesk', system-ui, sans-serif;
+    font-weight: 600;
+    cursor: pointer;
 }
 
 body {
     display: flex;
+    overflow-x: hidden;
 }
 
 .side-column {
@@ -19,8 +58,11 @@ body {
 
 #main-content {
     display: flex;
+    flex-direction: column;
     flex-grow: 1;
-    justify-content: center;
+    min-width: 0;
+    overflow: hidden;
+    padding: 70px 15px 20px;
 }
 
 /*
@@ -31,7 +73,7 @@ body {
     width: 150px;
     overflow: hidden;
     transition: width 0.3s ease;
-    background-color: blueviolet;
+    background-color: #e85d4c;
     padding-top: 100px;
 }
 
@@ -62,7 +104,7 @@ body {
 }
 
 .hamburger-inner, .hamburger-inner:after, .hamburger-inner:before {
-    background-color: #000000
+    background-color: #2d2a4a
 }
 
 .hamburger-box {
@@ -86,7 +128,7 @@ body {
     transition-duration: .15s;
     transition-property: transform;
     border-radius: 4px;
-    background-color: #000000
+    background-color: #2d2a4a
 }
 
 .hamburger-inner:after,.hamburger-inner:before {
@@ -130,4 +172,68 @@ body {
     bottom: 0;
     transition: bottom 75ms ease,transform 75ms cubic-bezier(.215,.61,.355,1) .12s;
     transform: rotate(-90deg)
+}
+
+/*
+ * Entity list and form
+ */
+.entity-form {
+    display: flex;
+    padding-bottom: 0.5rem;
+}
+
+.entity-form input[type="text"] {
+    flex: 1;
+    min-width: 0;
+    padding: 0.75rem 1rem;
+    font-family: 'Space Grotesk', system-ui, sans-serif;
+    font-size: 1rem;
+    font-weight: 500;
+    color: #2d2a4a;
+    background-color: #fff;
+    border: 2px solid #2d2a4a;
+    border-right: none;
+    outline: none;
+    transition: border-color 0.2s ease;
+}
+
+.entity-form input[type="text"]::placeholder {
+    color: #9995a8;
+}
+
+.entity-form input[type="text"]:focus {
+    border-color: #e85d4c;
+}
+
+.entity-form button {
+    width: 48px;
+    min-width: 48px;
+    height: 48px;
+    flex-shrink: 0;
+    padding: 0;
+    font-size: 1.5rem;
+    font-weight: 700;
+    line-height: 1;
+    color: #fff;
+    background-color: #e85d4c;
+    border: 2px solid #e85d4c;
+    transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.entity-form button:hover {
+    background-color: #c94a3a;
+    border-color: #c94a3a;
+}
+
+#entity-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+#entity-list li {
+    padding: 0.75rem 1rem;
+    margin-bottom: 0.5rem;
+    background-color: #fff;
+    border-left: 4px solid #e85d4c;
 }

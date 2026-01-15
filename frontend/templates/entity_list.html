@@ -1,10 +1,9 @@
-<div class="main-content">
-    <div class="entity-add">
-        <form>Aggiungi {{ entity_type }}</form>
-    </div>
-    <ul id="entity-list">
-        {% for item in items %}
-        <li>{{ item }}</li>
-        {% endfor %}
-    </ul>
-</div>
+<form class="entity-form" hx-post="/api/{{ entity_type }}" hx-target="#entity-list" hx-swap="beforeend">
+    <input type="text" name="name" placeholder="Nome {{ entity_type }}" required>
+    <button type="submit">+</button>
+</form>
+<ul id="entity-list">
+    {% for item in items %}
+    <li>{{ item }}</li>
+    {% endfor %}
+</ul>
