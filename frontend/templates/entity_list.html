@@ -1,0 +1,10 @@
+<div class="main-content">
+    <div class="entity-add">
+        <form>Aggiungi {{ entity_type }}</form>
+    </div>
+    <ul id="entity-list">
+        {% for item in items %}
+        <li>{{ item }}</li>
+        {% endfor %}
+    </ul>
+</div>
