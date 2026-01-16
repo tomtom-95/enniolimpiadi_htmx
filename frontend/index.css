@@ -226,14 +226,115 @@ body {
 }
 
 #entity-list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
+    display: flex;
+    flex-direction: column;
 }
 
-#entity-list li {
+.entity-element {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
     padding: 0.75rem 1rem;
     margin-bottom: 0.5rem;
     background-color: #fff;
     border-left: 4px solid #e85d4c;
+    cursor: pointer;
+    transition: background-color 0.2s ease, border-left-color 0.2s ease;
+}
+
+.entity-element:hover {
+    background-color: #f5f0e6;
+    border-left-color: #c94a3a;
+}
+
+.item-icons {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.item-icons button {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    position: relative;
+    opacity: 0.6;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.item-icons button:hover {
+    opacity: 1;
+    transform: scale(1.1);
+}
+
+/* Pencil icon for rename */
+.item-rename {
+    -webkit-tap-highlight-color: transparent;
+}
+
+.item-rename::before {
+    content: '';
+    position: absolute;
+    top: 4px;
+    left: 13px;
+    width: 6px;
+    height: 16px;
+    background-color: #2d2a4a;
+    transform: rotate(30deg);
+    border-radius: 1px 1px 0 0;
+}
+
+.item-rename::after {
+    content: '';
+    position: absolute;
+    bottom: 3px;
+    left: 9px;
+    width: 0;
+    height: 0;
+    border-left: 3px solid transparent;
+    border-right: 3px solid transparent;
+    border-top: 8px solid #e85d4c;
+    transform: rotate(30deg);
+}
+
+.item-delete {
+    -webkit-tap-highlight-color: transparent;
+}
+
+/* Trash icon for delete */
+.item-delete::before {
+    content: '';
+    position: absolute;
+    top: 10px;
+    left: 8px;
+    width: 16px;
+    height: 14px;
+    background-color: #e85d4c;
+    border-radius: 0 0 3px 3px;
+}
+
+.item-delete::after {
+    content: '';
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    width: 20px;
+    height: 3px;
+    background-color: #e85d4c;
+    border-radius: 1px;
+}
+
+/*
+ * Olympiad badge
+ */
+#olympiad-badge {
+    position: absolute;
+    top: 15px;
+    right: 15px;
+    padding: 8px 16px;
+    background-color: #2d2a4a;
+    color: #faf5eb;
+    font-weight: 600;
+    border-radius: 4px;
 }
