@@ -22,14 +22,23 @@
                 </ul>
             </div>
         </div>
-        <div id="olympiad-badge">Olympiad badge</div>
-        <div id="main-content">
-        </div>
+        <div id="olympiad-badge-container">Olympiad badge</div>
+        <div id="main-content"></div>
         <script>
             // TODO: I thought this would happen on press but it seems to happen on release
             document.querySelector('.hamburger').addEventListener('click', function() {
                 this.classList.toggle('is-active');
                 document.querySelector('.side-menu').classList.toggle('is-collapsed');
+            });
+
+            // Automatically add olympiad_id to all non-olympiad API requests
+            document.body.addEventListener('htmx:configRequest', function(event) {
+                if (event.detail.path.includes('/api/olympiads')) return;
+
+                const olympiadId = document.getElementById('olympiad-badge')?.dataset?.id;
+                if (olympiadId) {
+                    event.detail.parameters['olympiad_id'] = olympiadId;
+                }
             });
         </script>
     </body>
