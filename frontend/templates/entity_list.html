@@ -1,5 +1,5 @@
 <form class="entity-form" hx-post="/api/{{ entities }}" hx-target="#main-content">
-    <input type="text" name="name" placeholder="Aggiungi {{ entity_label }}" required>
+    <input type="text" name="name" placeholder="{{ placeholder }}" required>
     <button type="submit">+</button>
 </form>
 <div id="entity-list">

@@ -1,0 +1,48 @@
+<div class="modal-overlay" hx-on:click="if(event.target === this) this.remove()">
+    <div class="modal-content">
+        <h3>Crea olimpiade: {{ name }}</h3>
+        {% if error %}
+        <div class="error-banner">{{ error }}</div>
+        {% endif %}
+        <form hx-post="/api/olympiads/confirm_creation" hx-target="#main-content" hx-on::after-request="document.querySelector('.modal-overlay')?.remove()">
+            <input type="hidden" name="name" value="{{ name }}">
+            <input type="hidden" name="pin" id="pin-hidden">
+            <div class="pin-input-container">
+                <input type="text" inputmode="numeric" maxlength="1" class="pin-digit" data-index="0" autofocus>
+                <input type="text" inputmode="numeric" maxlength="1" class="pin-digit" data-index="1">
+                <input type="text" inputmode="numeric" maxlength="1" class="pin-digit" data-index="2">
+                <input type="text" inputmode="numeric" maxlength="1" class="pin-digit" data-index="3">
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn-cancel" onclick="this.closest('.modal-overlay').remove()">Annulla</button>
+                <button type="submit" class="btn-submit">Crea</button>
+            </div>
+        </form>
+        <script>
+            // TODO: do I really need/want this javascript?
+            (function() {
+                const digits = document.querySelectorAll('.pin-digit');
+                const hidden = document.getElementById('pin-hidden');
+
+                function updateHidden() {
+                    hidden.value = Array.from(digits).map(d => d.value).join('');
+                }
+
+                digits.forEach((input, idx) => {
+                    input.addEventListener('input', (e) => {
+                        const val = e.target.value.replace(/\D/g, '');
+                        e.target.value = val.slice(-1);
+                        updateHidden();
+                        if (val && idx < 3) digits[idx + 1].focus();
+                    });
+
+                    input.addEventListener('keydown', (e) => {
+                        if (e.key === 'Backspace' && !e.target.value && idx > 0) {
+                            digits[idx - 1].focus();
+                        }
+                    });
+                });
+            })();
+        </script>
+    </div>
+</div>

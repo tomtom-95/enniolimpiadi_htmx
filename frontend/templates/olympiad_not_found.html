@@ -1,5 +1,6 @@
-<div class="message-box error">
+<div class="error-state">
     <p>L'olimpiade selezionata non esiste più.</p>
+    <button hx-get="/api/olympiads" hx-target="#main-content">Aggiorna l'applicazione</button>
 </div>
 
 <div id="olympiad-badge-container" hx-swap-oob="true">Olympiad badge</div>
