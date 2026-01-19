@@ -1,0 +1,6 @@
+<div class="error-state">
+    <p>Il nome dell'olimpiade su cui stavi lavorando o che hai cliccato è stato modificato da qualche admin</p>
+    <button hx-get="/api/olympiads" hx-target="#main-content">Aggiorna l'applicazione</button>
+</div>
+
+<div id="olympiad-badge-container" hx-swap-oob="true">{{ olympiad-name }}</div>

@@ -6,6 +6,7 @@
         <title>Olimpiadi - Vanilla</title>
         <link rel="stylesheet" href="index.css">
         <script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"></script>
+        <script src="https://unpkg.com/hyperscript.org@0.9.13"></script>
     </head>
     <body>
         <div class="hamburger">
@@ -40,6 +41,15 @@
         const olympiadId = document.getElementById('olympiad-badge')?.dataset?.id;
         if (olympiadId) {
             event.detail.parameters['olympiad_id'] = olympiadId;
+        }
+    });
+
+    // After PIN validation, re-submit the original form that triggered the PIN prompt
+    document.body.addEventListener('retryPendingAction', function() {
+        // The original form is still in #main-content with user's data filled in
+        const pendingForm = document.querySelector('#main-content form');
+        if (pendingForm) {
+            pendingForm.requestSubmit();
         }
     });
 </script>

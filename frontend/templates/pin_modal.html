@@ -1,25 +1,25 @@
-<div class="modal-overlay" hx-on:click="if(event.target === this) this.remove()">
+<div class="modal-overlay" _="on click if event.target is me remove me end on closeModal from body remove me">
     <div class="modal-content">
-        <h3>Crea olimpiade: {{ name }}</h3>
+        <h3>Inserisci PIN</h3>
         {% if error %}
-        <div class="error-banner">{{ error }}</div>
+            <div class="error-banner">{{ error }}</div>
         {% endif %}
-        <form hx-post="/api/olympiads/confirm_creation" hx-target="#main-content" hx-on::after-request="document.querySelector('.modal-overlay')?.remove()">
-            <input type="hidden" name="name" value="{{ name }}">
-            <input type="hidden" name="pin" id="pin-hidden">
+        <form hx-post="{{ action }}" hx-target="#modal-container">
+            {% if name %}<input type="hidden" name="name" value="{{ name }}">{% endif %}
+            {% if olympiad_id %}<input type="hidden" name="olympiad_id" value="{{ olympiad_id }}">{% endif %}
+            <input type="hidden" name="pin" id="pin-hidden" value="{{ pin | default('') }}">
             <div class="pin-input-container">
-                <input type="text" inputmode="numeric" maxlength="1" class="pin-digit" data-index="0" autofocus>
-                <input type="text" inputmode="numeric" maxlength="1" class="pin-digit" data-index="1">
-                <input type="text" inputmode="numeric" maxlength="1" class="pin-digit" data-index="2">
-                <input type="text" inputmode="numeric" maxlength="1" class="pin-digit" data-index="3">
+                <input type="text" inputmode="numeric" maxlength="1" class="pin-digit" autofocus>
+                <input type="text" inputmode="numeric" maxlength="1" class="pin-digit">
+                <input type="text" inputmode="numeric" maxlength="1" class="pin-digit">
+                <input type="text" inputmode="numeric" maxlength="1" class="pin-digit">
             </div>
             <div class="modal-actions">
-                <button type="button" class="btn-cancel" onclick="this.closest('.modal-overlay').remove()">Annulla</button>
-                <button type="submit" class="btn-submit">Crea</button>
+                <button type="button" class="btn-cancel" _="on click remove closest .modal-overlay">Annulla</button>
+                <button type="submit" class="btn-submit">{{ submit_text | default("Conferma") }}</button>
             </div>
         </form>
         <script>
-            // TODO: do I really need/want this javascript?
             (function() {
                 const digits = document.querySelectorAll('.pin-digit');
                 const hidden = document.getElementById('pin-hidden');

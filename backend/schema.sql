@@ -147,6 +147,24 @@ CREATE TABLE match_participant_scores (
 );
 
 -- =====================
+-- SESSIONS
+-- =====================
+CREATE TABLE sessions (
+    id TEXT PRIMARY KEY,  -- secure random token
+    selected_olympiad_id INTEGER,
+    selected_olympiad_version INTEGER,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_accessed TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+                                                                                                                                                                                                                      
+CREATE TABLE session_olympiad_auth (
+    session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
+    olympiad_id INTEGER REFERENCES olympiads(id) ON DELETE CASCADE,
+    authorized_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (session_id, olympiad_id)
+); 
+
+-- =====================
 -- INDEXES
 -- =====================
 CREATE INDEX idx_events_olympiad_id ON events(olympiad_id);
