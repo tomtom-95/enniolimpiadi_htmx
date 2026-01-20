@@ -17,7 +17,7 @@
         <div class="side-column">
             <div class="side-menu is-collapsed">
                 <ul>
-                    <li hx-get="api/olympiads" hx-trigger="load, click" hx-target="#main-content">Olimpiadi</li>
+                    <li hx-get="api/olympiads" hx-trigger="click" hx-target="#main-content">Olimpiadi</li>
                     <li hx-get="api/events" hx-trigger="click" hx-target="#main-content">Eventi</li>
                     <li hx-get="api/players" hx-trigger="click" hx-target="#main-content">Giocatori</li>
                 </ul>
@@ -32,16 +32,6 @@
     document.querySelector('.hamburger').addEventListener('click', function() {
         this.classList.toggle('is-active');
         document.querySelector('.side-menu').classList.toggle('is-collapsed');
-    });
-
-    // Automatically add olympiad_id to all non-olympiad API requests
-    document.body.addEventListener('htmx:configRequest', function(event) {
-        if (event.detail.path.includes('/api/olympiads')) return;
-
-        const olympiadId = document.getElementById('olympiad-badge')?.dataset?.id;
-        if (olympiadId) {
-            event.detail.parameters['olympiad_id'] = olympiadId;
-        }
     });
 
     // After PIN validation, re-submit the original form that triggered the PIN prompt

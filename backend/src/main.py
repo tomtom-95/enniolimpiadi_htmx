@@ -36,9 +36,7 @@ def get_db():
     finally:
         conn.close()
 
-def check_selected_olympiad(
-    conn, request, session_id, selected_olympiad_id, selected_olympiad_version
-):
+def check_selected_olympiad(conn, request, session):
     """
     Check if the selected olympiad still exists and has the correct version.
     Updates session state and returns an appropriate response if needed.
@@ -47,6 +45,9 @@ def check_selected_olympiad(
         None if no selected olympiad or everything is up to date.
         A Response object if the olympiad was deleted or its version changed.
     """
+
+    selected_olympiad_id = session["selected_olympiad_id"]
+    selected_olympiad_version = session["selected_olympiad_version"]
     if not selected_olympiad_id:
         return None
 
@@ -58,7 +59,7 @@ def check_selected_olympiad(
     if not olympiad:
         conn.execute(
             "UPDATE sessions SET (selected_olympiad_id, selected_olympiad_version) = (NULL, NULL) WHERE id = ?",
-            (session_id,)
+            (request.state.session_id,)
         )
         conn.commit()
         return templates.TemplateResponse(request, "olympiad_not_found.html")
@@ -66,12 +67,12 @@ def check_selected_olympiad(
     if olympiad["version"] != selected_olympiad_version:
         conn.execute(
             "UPDATE sessions SET selected_olympiad_version = ? WHERE id = ?",
-            (olympiad["version"], session_id)
+            (olympiad["version"], request.state.session_id)
         )
         conn.commit()
         return templates.TemplateResponse(
             request, "olympiad_name_changed.html",
-            {"olympiad-name": olympiad["name"]}
+            {"olympiad_name": olympiad["name"]}
         )
 
     return None
@@ -101,7 +102,7 @@ async def session_middleware(request: Request, call_next):
             session_id = secrets.token_urlsafe(32)
             conn.execute("INSERT INTO sessions (id) VALUES (?)", (session_id,))
             conn.commit()
-    
+
         request.state.session_id = session_id
 
         response = await call_next(request)
@@ -128,16 +129,14 @@ async def serve_css(filename: str):
     return Response(content=css_path.read_text(), media_type="text/css")
 
 @app.get("/api/olympiads")
-async def get_olympiads(request: Request, conn = Depends(get_db)):
+async def list_olympiads(request: Request, conn = Depends(get_db)):
+    session_id = request.state.session_id
     session = conn.execute(
         "SELECT selected_olympiad_id, selected_olympiad_version FROM sessions WHERE id = ?",
-        (request.state.session_id,)
+        (session_id,)
     ).fetchone()
 
-    response = check_selected_olympiad(
-        conn, request, request.state.session_id,
-        session["selected_olympiad_id"], session["selected_olympiad_version"]
-    )
+    response = check_selected_olympiad(conn, request, session)
     if response:
         return response
 
@@ -148,29 +147,89 @@ async def get_olympiads(request: Request, conn = Depends(get_db)):
         request, "entity_list.html",
         {"entities": "olympiads", "placeholder": placeholder, "items": rows}
     )
-    
+
     return response
 
-# TODO: fix security issues
+ALLOWED_ENTITIES = {"players", "events", "teams"}
+
 @app.get("/api/{entities}")
-async def get_entities(request: Request, entities: str, olympiad_id: str = "", conn = Depends(get_db)):
-    if olympiad_id:
-        cursor = conn.execute(f"SELECT id FROM olympiads WHERE id = {olympiad_id}")
-        row = cursor.fetchone()
-        if row:
-            cursor = conn.execute(
-                f"SELECT e.id, e.name, e.version FROM {entities} e JOIN olympiads o ON o.id = e.olympiad_id WHERE o.id = ?",
-                (olympiad_id,)
-            )
-            rows = [{"id": row["id"], "name": row["name"], "version": row["version"]} for row in cursor.fetchall()]
-            placeholder = entity_list_form_placeholder[entities]
-            return templates.TemplateResponse(
-                request, "entity_list.html", {"entities": entities, "placeholder": placeholder, "items": rows}
-            )
-        else:
-            return templates.TemplateResponse(request, "olympiad_not_found.html")
-    else:
-        return templates.TemplateResponse(request, "select_olympiad_required.html", {"message": select_olympiad_message[entities]})
+async def list_entities(request: Request, entities: str, conn = Depends(get_db)):
+    if entities not in ALLOWED_ENTITIES:
+        return JSONResponse(status_code=404, content={"detail": "Not found"})
+
+    session_id = request.state.session_id
+
+    # Single atomic query to get session state, olympiad state, and entities.
+    # This eliminates race conditions between checking olympiad validity and fetching entities.
+    rows = conn.execute(
+        f"""
+        SELECT
+            s.selected_olympiad_id,
+            s.selected_olympiad_version as session_version,
+            o.id as olympiad_id,
+            o.name as olympiad_name,
+            o.version as olympiad_version,
+            e.id as entity_id,
+            e.name as entity_name,
+            e.version as entity_version
+        FROM sessions s
+        LEFT JOIN olympiads o ON o.id = s.selected_olympiad_id
+        LEFT JOIN {entities} e ON e.olympiad_id = o.id
+        WHERE s.id = ?
+        """,
+        (session_id,)
+    ).fetchall()
+
+    if not rows:
+        # Should never happen - session must exist due to middleware
+        return templates.TemplateResponse(
+            request, "select_olympiad_required.html", {"message": select_olympiad_message[entities]}
+        )
+
+    first_row = rows[0]
+
+    # Case 1: No olympiad selected
+    if first_row["selected_olympiad_id"] is None:
+        return templates.TemplateResponse(
+            request, "select_olympiad_required.html", {"message": select_olympiad_message[entities]}
+        )
+
+    # Case 2: Olympiad was deleted
+    if first_row["olympiad_id"] is None:
+        conn.execute(
+            "UPDATE sessions SET selected_olympiad_id = NULL, selected_olympiad_version = NULL WHERE id = ?",
+            (session_id,)
+        )
+        conn.commit()
+        return templates.TemplateResponse(request, "olympiad_not_found.html")
+
+    # Case 3: Olympiad version mismatch (was renamed)
+    if first_row["olympiad_version"] != first_row["session_version"]:
+        conn.execute(
+            "UPDATE sessions SET selected_olympiad_version = ? WHERE id = ?",
+            (first_row["olympiad_version"], session_id)
+        )
+        conn.commit()
+        return templates.TemplateResponse(
+            request, "olympiad_name_changed.html",
+            {"olympiad_name": first_row["olympiad_name"]}
+        )
+
+    # Case 4 & 5: Valid olympiad - extract entities (may be empty)
+    items = []
+    for row in rows:
+        if row["entity_id"] is not None:
+            items.append({
+                "id": row["entity_id"],
+                "name": row["entity_name"],
+                "version": row["entity_version"]
+            })
+
+    placeholder = entity_list_form_placeholder[entities]
+    return templates.TemplateResponse(
+        request, "entity_list.html",
+        {"entities": entities, "placeholder": placeholder, "items": items}
+    )
 
 @app.get("/api/olympiads/{olympiad_id}")
 async def select_olympiad(
@@ -181,16 +240,14 @@ async def select_olympiad(
 ):
     """Select an olympiad and update the olympiad badge"""
 
+    session_id = request.state.session_id
     session = conn.execute(
-        "SELECT id, selected_olympiad_id, selected_olympiad_version FROM sessions WHERE id = ?",
-        (request.state.session_id,)
+        "SELECT selected_olympiad_id, selected_olympiad_version FROM sessions WHERE id = ?",
+        (session_id,)
     ).fetchone()
 
     # Check if currently selected olympiad is still valid (sync session state)
-    response = check_selected_olympiad(
-        conn, request, request.state.session_id,
-        session["selected_olympiad_id"], session["selected_olympiad_version"]
-    )
+    response = check_selected_olympiad(conn, request, session)
     if response:
         response.headers["HX-Retarget"] = "#main-content"
         return response
@@ -208,7 +265,7 @@ async def select_olympiad(
 
     if olympiad["version"] != version:
         response = templates.TemplateResponse(
-            request, "olympiad_name_changed.html", {"olympiad-name": olympiad["name"]}
+            request, "olympiad_name_changed.html", {"olympiad_name": olympiad["name"]}
         )
         response.headers["HX-Retarget"] = "#main-content"
         return response
@@ -233,7 +290,7 @@ async def create_olympiad(
     conn = Depends(get_db)
 ):
     # First call (no PIN): show PIN modal
-    if not pin:
+    if pin is None:
         response = templates.TemplateResponse(
             request, "pin_modal.html", {
                 "name": name,
@@ -256,8 +313,11 @@ async def create_olympiad(
         )
         return response
 
-    # PIN valid: just close the modal for now
     # TODO: insert olympiad into database
+    #       try to insert the olympiad in the database
+    #       how can it fail? olympiad name already exist, must show a message, I can closeModal,
+    #       retarget main-content and have a message there similar to the one in olympiad_not_found.html
+    #       store in auth table data for this session user, add a row with current session_id and olympiad_id to session_olympiad_auth
     response = HTMLResponse("")
     response.headers["HX-Trigger-After-Settle"] = "closeModal"
     return response
@@ -302,7 +362,7 @@ async def create_player(
 ):
     cookie = request.cookies.get(f"olympiad_auth_{olympiad_id}")
 
-    # TODO: must check that 
+    # TODO: must check that
     if not cookie:
         # Return PIN modal, but DON'T replace the form - target modal container instead
         response = templates.TemplateResponse(

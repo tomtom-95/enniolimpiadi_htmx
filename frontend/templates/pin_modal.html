@@ -21,27 +21,36 @@
         </form>
         <script>
             (function() {
-                const digits = document.querySelectorAll('.pin-digit');
-                const hidden = document.getElementById('pin-hidden');
+                const script = document.currentScript;
+                const modal = script.closest('.modal-content');
 
-                function updateHidden() {
-                    hidden.value = Array.from(digits).map(d => d.value).join('');
+                function initPinInputs() {
+                    const digits = modal.querySelectorAll('.pin-digit');
+                    const hidden = modal.querySelector('#pin-hidden');
+
+                    function updateHidden() {
+                        hidden.value = Array.from(digits).map(d => d.value).join('');
+                    }
+
+                    digits.forEach((input, idx) => {
+                        input.addEventListener('input', (e) => {
+                            const val = e.target.value.replace(/\D/g, '');
+                            e.target.value = val.slice(-1);
+                            updateHidden();
+                            if (val && idx < 3) {
+                                digits[idx + 1].focus();
+                            }
+                        });
+
+                        input.addEventListener('keydown', (e) => {
+                            if (e.key === 'Backspace' && !e.target.value && idx > 0) {
+                                digits[idx - 1].focus();
+                            }
+                        });
+                    });
                 }
 
-                digits.forEach((input, idx) => {
-                    input.addEventListener('input', (e) => {
-                        const val = e.target.value.replace(/\D/g, '');
-                        e.target.value = val.slice(-1);
-                        updateHidden();
-                        if (val && idx < 3) digits[idx + 1].focus();
-                    });
-
-                    input.addEventListener('keydown', (e) => {
-                        if (e.key === 'Backspace' && !e.target.value && idx > 0) {
-                            digits[idx - 1].focus();
-                        }
-                    });
-                });
+                document.body.addEventListener('htmx:afterSettle', initPinInputs, { once: true });
             })();
         </script>
     </div>
