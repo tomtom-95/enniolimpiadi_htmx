@@ -159,43 +159,51 @@ async def list_entities(request: Request, entities: str, conn = Depends(get_db))
 
     session_id = request.state.session_id
 
-    # Single atomic query to get session state, olympiad state, and entities.
-    # This eliminates race conditions between checking olympiad validity and fetching entities.
-    rows = conn.execute(
+    # Happy path: lean query that only returns entities if olympiad is valid and version matches.
+    # Uses INNER JOINs so rows only returned when everything is valid.
+    items = conn.execute(
         f"""
+        SELECT e.id, e.name, e.version
+        FROM {entities} e
+        JOIN olympiads o ON o.id = e.olympiad_id
+        JOIN sessions s ON s.selected_olympiad_id = o.id
+                       AND s.selected_olympiad_version = o.version
+                       AND s.id = ?
+        """,
+        (session_id,)
+    ).fetchall()
+
+    if items:
+        placeholder = entity_list_form_placeholder[entities]
+        return templates.TemplateResponse(
+            request, "entity_list.html",
+            {"entities": entities, "placeholder": placeholder, "items": items}
+        )
+
+    # No rows returned - diagnose why with a single query
+    diag = conn.execute(
+        """
         SELECT
             s.selected_olympiad_id,
             s.selected_olympiad_version as session_version,
             o.id as olympiad_id,
             o.name as olympiad_name,
-            o.version as olympiad_version,
-            e.id as entity_id,
-            e.name as entity_name,
-            e.version as entity_version
+            o.version as olympiad_version
         FROM sessions s
         LEFT JOIN olympiads o ON o.id = s.selected_olympiad_id
-        LEFT JOIN {entities} e ON e.olympiad_id = o.id
         WHERE s.id = ?
         """,
         (session_id,)
-    ).fetchall()
-
-    if not rows:
-        # Should never happen - session must exist due to middleware
-        return templates.TemplateResponse(
-            request, "select_olympiad_required.html", {"message": select_olympiad_message[entities]}
-        )
-
-    first_row = rows[0]
+    ).fetchone()
 
     # Case 1: No olympiad selected
-    if first_row["selected_olympiad_id"] is None:
+    if diag["selected_olympiad_id"] is None:
         return templates.TemplateResponse(
             request, "select_olympiad_required.html", {"message": select_olympiad_message[entities]}
         )
 
     # Case 2: Olympiad was deleted
-    if first_row["olympiad_id"] is None:
+    if diag["olympiad_id"] is None:
         conn.execute(
             "UPDATE sessions SET selected_olympiad_id = NULL, selected_olympiad_version = NULL WHERE id = ?",
             (session_id,)
@@ -204,32 +212,24 @@ async def list_entities(request: Request, entities: str, conn = Depends(get_db))
         return templates.TemplateResponse(request, "olympiad_not_found.html")
 
     # Case 3: Olympiad version mismatch (was renamed)
-    if first_row["olympiad_version"] != first_row["session_version"]:
+    if diag["olympiad_version"] != diag["session_version"]:
         conn.execute(
             "UPDATE sessions SET selected_olympiad_version = ? WHERE id = ?",
-            (first_row["olympiad_version"], session_id)
+            (diag["olympiad_version"], session_id)
         )
         conn.commit()
         return templates.TemplateResponse(
             request, "olympiad_name_changed.html",
-            {"olympiad_name": first_row["olympiad_name"]}
+            {"olympiad_name": diag["olympiad_name"]}
         )
 
-    # Case 4 & 5: Valid olympiad - extract entities (may be empty)
-    items = []
-    for row in rows:
-        if row["entity_id"] is not None:
-            items.append({
-                "id": row["entity_id"],
-                "name": row["entity_name"],
-                "version": row["entity_version"]
-            })
-
+    # Case 4: Valid olympiad, just no entities yet
     placeholder = entity_list_form_placeholder[entities]
     return templates.TemplateResponse(
         request, "entity_list.html",
-        {"entities": entities, "placeholder": placeholder, "items": items}
+        {"entities": entities, "placeholder": placeholder, "items": []}
     )
+
 
 @app.get("/api/olympiads/{olympiad_id}")
 async def select_olympiad(
