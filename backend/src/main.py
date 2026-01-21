@@ -16,6 +16,8 @@ schema_path = Path(os.environ["SCHEMA_PATH"])
 root = Path(os.environ["PROJECT_ROOT"])
 templates = Jinja2Templates(directory=root / "frontend" / "templates")
 
+ALLOWED_ENTITIES = {"players", "events", "teams"}
+
 entity_list_form_placeholder = {
     "olympiads": "Aggiungi una nuova olimpiade",
     "players": "Aggiungi un nuovo giocatore",
@@ -150,8 +152,6 @@ async def list_olympiads(request: Request, conn = Depends(get_db)):
 
     return response
 
-ALLOWED_ENTITIES = {"players", "events", "teams"}
-
 @app.get("/api/{entities}")
 async def list_entities(request: Request, entities: str, conn = Depends(get_db)):
     if entities not in ALLOWED_ENTITIES:
@@ -159,16 +159,12 @@ async def list_entities(request: Request, entities: str, conn = Depends(get_db))
 
     session_id = request.state.session_id
 
-    # Happy path: lean query that only returns entities if olympiad is valid and version matches.
-    # Uses INNER JOINs so rows only returned when everything is valid.
     items = conn.execute(
         f"""
         SELECT e.id, e.name, e.version
         FROM {entities} e
         JOIN olympiads o ON o.id = e.olympiad_id
-        JOIN sessions s ON s.selected_olympiad_id = o.id
-                       AND s.selected_olympiad_version = o.version
-                       AND s.id = ?
+        JOIN sessions s ON s.selected_olympiad_id = o.id AND s.selected_olympiad_version = o.version AND s.id = ?
         """,
         (session_id,)
     ).fetchall()
@@ -239,20 +235,6 @@ async def select_olympiad(
     conn = Depends(get_db)
 ):
     """Select an olympiad and update the olympiad badge"""
-
-    session_id = request.state.session_id
-    session = conn.execute(
-        "SELECT selected_olympiad_id, selected_olympiad_version FROM sessions WHERE id = ?",
-        (session_id,)
-    ).fetchone()
-
-    # Check if currently selected olympiad is still valid (sync session state)
-    response = check_selected_olympiad(conn, request, session)
-    if response:
-        response.headers["HX-Retarget"] = "#main-content"
-        return response
-
-    # Validate the newly selected olympiad exists and version matches
     olympiad = conn.execute(
         "SELECT id, name, version FROM olympiads WHERE id = ?",
         (olympiad_id,)
@@ -312,45 +294,91 @@ async def create_olympiad(
             }
         )
         return response
+    
+    try:
+        row = conn.execute(
+            f"INSERT INTO olympiads (name, pin) VALUES (?, ?) RETURNING id",
+            (name, pin)
+        ).fetchone()
+        olympiad_id = row[0]
+    except sqlite3.IntegrityError:
+        response = templates.TemplateResponse(
+            request, "olympiad_name_duplicate.html",
+        )
+        response.headers["HX-Retarget"] = '#main-content'
+        response.headers["HX-Trigger-After-Settle"] = "closeModal"
+        return response
+    
+    # Happy path - return updated list                                                                                                                                                                                                               
 
-    # TODO: insert olympiad into database
-    #       try to insert the olympiad in the database
-    #       how can it fail? olympiad name already exist, must show a message, I can closeModal,
-    #       retarget main-content and have a message there similar to the one in olympiad_not_found.html
-    #       store in auth table data for this session user, add a row with current session_id and olympiad_id to session_olympiad_auth
-    response = HTMLResponse("")
-    response.headers["HX-Trigger-After-Settle"] = "closeModal"
-    return response
+    conn.execute(
+        f"INSERT INTO session_olympiad_auth (session_id, olympiad_id) VALUES (?, ?)",
+        (request.state.session_id, olympiad_id)
+    )
+    conn.commit()
+
+    cursor = conn.execute("SELECT id, name, version FROM olympiads")                                                                                                                                                                                 
+    rows = [{"id": row["id"], "name": row["name"], "version": row["version"]} for row in cursor.fetchall()]                                                                                                                                          
+    placeholder = entity_list_form_placeholder["olympiads"]                                                                                                                                                                                          
+    response = templates.TemplateResponse(                                                                                                                                                                                                           
+        request, "entity_list.html",                                                                                                                                                                                                                 
+        {"entities": "olympiads", "placeholder": placeholder, "items": rows}                                                                                                                                                                         
+    )                                                                                                                                                                                                                                                
+    response.headers["HX-Retarget"] = "#main-content"                                                                                                                                                                                                
+    response.headers["HX-Trigger-After-Settle"] = "closeModal"                                                                                                                                                                                       
+
+    return response 
+
 
 @app.post("/api/validate_pin")
 async def validate_pin(
     request: Request,
-    olympiad_id: str = Form(...),
     pin: str = Form(...),
     conn = Depends(get_db)
 ):
-    cursor = conn.execute("SELECT pin FROM olympiads WHERE id = ?", (olympiad_id,))
-    row = cursor.fetchone()
+    # TODO: validate_pin (and where it's called) must be modified to pass explicitly the olympiad_id paramter
+    #       I do not want to always use the selected_olympaid_id by the session
+    #       for example: I want to be able to rename an olympiad even if it is not the currently selected
+    session_id = request.state.session_id
 
-    if not row or row["pin"] != pin:
+    # Get the selected olympiad and its PIN
+    row = conn.execute(
+        """
+        SELECT o.id, o.pin
+        FROM sessions s
+        JOIN olympiads o ON o.id = s.selected_olympiad_id
+        WHERE s.id = ?
+        """,
+        (session_id,)
+    ).fetchone()
+
+    if not row:
+        # No olympiad selected or it was deleted
+        response = templates.TemplateResponse(request, "olympiad_not_found.html")
+        response.headers["HX-Retarget"] = "#main-content"
+        response.headers["HX-Trigger-After-Settle"] = "closeModal"
+        return response
+
+    if row["pin"] != pin:
+        # Wrong PIN - show error in modal
         response = templates.TemplateResponse(
-            request, "pin_modal.html", {
-                "olympiad_id": olympiad_id,
-                "action": "/api/validate_pin",
-                "error": "PIN errato",
-                "pin": ""
-            }
+            request, "pin_modal.html",
+            {"action": "/api/validate_pin", "error": "PIN errato"}
         )
         return response
 
-    # Success - set cookie and trigger retry
-    response = HTMLResponse("")
-    response.set_cookie(
-        key=f"olympiad_auth_{olympiad_id}",
-        value=f"valid_{olympiad_id}",  # TODO: sign this properly with itsdangerous
-        httponly=True,
-        max_age=86400  # 24 hours
+    # PIN is correct - grant access
+    conn.execute(
+        "INSERT OR IGNORE INTO session_olympiad_auth (session_id, olympiad_id) VALUES (?, ?)",
+        (session_id, row["id"])
     )
+    conn.commit()
+
+    # Here we should call the the function create_player with the player_name
+    # and then we should rerender the players list
+    # what I do not like is that in this way I have to make all the checks again
+
+    response = HTMLResponse("")
     response.headers["HX-Trigger-After-Settle"] = "closeModal"
     response.headers["HX-Trigger"] = "retryPendingAction"
     return response
@@ -358,41 +386,62 @@ async def validate_pin(
 
 @app.post("/api/players")
 async def create_player(
-    request: Request, name: str = Form(...), olympiad_id: str = Form(...), conn = Depends(get_db)
+    request: Request, name: str = Form(...), conn = Depends(get_db)
 ):
-    cookie = request.cookies.get(f"olympiad_auth_{olympiad_id}")
-
-    # TODO: must check that
-    if not cookie:
-        # Return PIN modal, but DON'T replace the form - target modal container instead
-        response = templates.TemplateResponse(
-            request, "pin_modal.html", {
-                "olympiad_id": olympiad_id,
-                "action": "/api/validate_pin"
-            }
-        )
-        response.headers["HX-Retarget"] = "#modal-container"
-        response.headers["HX-Reswap"] = "innerHTML"
+    # Check that the olympiad still exist
+    session_id = request.state.session_id
+    session = conn.execute(
+        "SELECT selected_olympiad_id, selected_olympiad_version FROM sessions WHERE id = ?",
+        (session_id,)
+    ).fetchone()
+    response = check_selected_olympiad(conn, request, session)
+    if response:
         return response
 
-    cursor = conn.execute(f"SELECT id, name, version FROM olympiads WHERE id = ?", (olympiad_id))
-    row = cursor.fetchone()
+    row = conn.execute(
+        """
+        SELECT s.selected_olympiad_id
+        FROM sessions s
+        JOIN session_olympiad_auth soa ON soa.olympiad_id = s.selected_olympiad_id AND soa.session_id = s.id
+        WHERE s.id = ?
+        """,
+        (session_id,)
+    ).fetchone()
     if not row:
-        return templates.TemplateResponse(request, "olympiad_not_found.html")
+        # Show the pin modal that must have validate pin as action
 
+        # TODO: if I am starting the trip to the pin_modal.html how can I complete
+        #       the action that I was doing upon successfull validation?
+        #       I must pass to the pin modal the api call (and parameters needed)
+        #       upon successfully calll to validate_pin
+        #       why I did not need it for create_olympiads? because create_olympias pass to the pin modal itself
+
+        response = templates.TemplateResponse(
+            request, "pin_modal.html", {"action": "/api/validate_pin"}
+        )
+        response.headers["HX-Retarget"] = "#modal-container"
+        return response
+
+    # I can add the player
     try:
-        conn.execute(f"INSERT INTO players (olympiad_id, name) VALUES (?, ?)", (olympiad_id, name))
+        conn.execute(
+            f"INSERT INTO players (olympiad_id, name) VALUES (?, ?)",
+            (row["selected_olympiad_id"], name)
+        )
     except sqlite3.IntegrityError:
         return templates.TemplateResponse(
-            request, "duplicate_name_error.html", {"message": "Un giocatore con questo nome è già presente", "entities": "players"}
+            request, "duplicate_name_error.html",
+            {"message": "Un giocatore con questo nome è già presente", "entities": "players"}
         )
     conn.commit()
+
     cursor = conn.execute(
         f"SELECT p.id, p.name, p.version FROM players p JOIN olympiads o ON o.id = p.olympiad_id WHERE o.id = ?",
-        (olympiad_id,)
+        (row["selected_olympiad_id"],)
     )
     rows = [{"id": row["id"], "name": row["name"], "version": row["version"]} for row in cursor.fetchall()]
     placeholder = entity_list_form_placeholder["players"]
+
     return templates.TemplateResponse(
         request, "entity_list.html", {"entities": "players", "placeholder": placeholder, "items": rows}
     )
