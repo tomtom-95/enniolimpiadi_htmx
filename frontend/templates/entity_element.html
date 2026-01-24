@@ -1,0 +1,11 @@
+<div class="entity-element" hx-get="/api/{{ entities }}/{{ item.id }}/{{ item.version }}" hx-target="{{ hx_target }}" hx-trigger="click">
+    <div class="item">{{ item.name }}</div>
+    <div class="item-icons">
+        <button class="item-rename" aria-label="Rename" hx-get="/api/edit/{{ entities }}/{{ item.id }}/{{ item.version }}"
+            hx-target="closest .entity-element" hx-trigger="click consume" hx-swap="outerHTML">
+        </button>
+        <button class="item-delete" aria-label="Delete" hx-delete="/api/{{ entities }}/{{ item.id }}/{{ item.version }}"
+            hx-target="closest .entity-element" hx-trigger="click consume" hx-swap="outerHTML">
+        </button>
+    </div>
+</div>

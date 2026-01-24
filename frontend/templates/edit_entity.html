@@ -1,0 +1,6 @@
+<div class="entity-element editing" data-id="{{ item_id }}" data-version="{{ item_version }}">
+    <form class="edit-form" hx-put="/api/{{ entities }}/{{ id }}/{{ version }}" hx-target="closest .entity-element" hx-swap="outerHTML">
+        <input type="text" name="name" value="{{ curr_name }}" class="edit-input" autofocus required
+            hx-get="/api/{{ entities }}" hx-target="#main-content" hx-swap="innerHTML" hx-trigger="blur delay:150ms">
+    </form>
+</div>

@@ -5,24 +5,6 @@
 <div id="entity-list">
     {% set hx_target = "#olympiad-badge-container" if entities == "olympiads" else "#main-content" %}
     {% for item in items %}
-        <div class="entity-element"
-            data-id="{{ item.id }}"
-            data-version="{{ item.version }}"
-            hx-get="/api/{{ entities }}/{{ item.id }}"
-            hx-target="{{ hx_target }}"
-            hx-trigger="click"
-            hx-vals='{"version": {{ item.version }}}'>
-            <div class="item">{{ item.name }}</div>
-            <div class="item-icons">
-                <button class="item-rename" aria-label="Rename" hx-get="/api/{{ entities }}/{{ item.id }}/edit"
-                    hx-target="closest .entity-element" hx-swap="outerHTML" hx-vals='{"version": {{ item.version }}}'
-                    hx-trigger="click consume">
-                </button>
-                <button class="item-delete" aria-label="Delete" hx-delete="/api/{{ entities }}/{{ item.id }}"
-                    hx-target="closest .entity-element" hx-swap="outerHTML" hx-vals='{"version": {{ item.version }}}'
-                    hx-confirm="Sei sicuro di voler eliminare {{ item.name }}?" hx-trigger="click consume">
-                </button>
-            </div>
-        </div>
+        {% include 'entity_element.html' %}
     {% endfor %}
 </div>

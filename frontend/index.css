@@ -51,11 +51,6 @@ body {
     display: flex;
 }
 
-.header {
-    display: flex;
-    height: 200px;
-}
-
 #main-content {
     display: flex;
     flex-direction: column;
@@ -393,18 +388,28 @@ body {
     display: none;
 }
 
-.modal-overlay {
+#modal {
     position: fixed;
     top: 0;
     left: 0;
     width: 100%;
     height: 100%;
-    background-color: rgba(45, 42, 74, 0.5);
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 100;
 }
+
+.modal-underlay {
+    z-index: -1;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(45, 42, 74, 0.5);
+}
+
 
 .modal-content {
     background-color: #faf5eb;
@@ -482,5 +487,31 @@ body {
 .modal-content .btn-submit:hover {
     background-color: #c94a3a;
     border-color: #c94a3a;
+}
+
+/*
+ * Inline edit
+ */
+.entity-element.editing {
+    padding: 0;
+    border-left: none;
+}
+
+.entity-element.editing .edit-form {
+    display: flex;
+    width: 100%;
+}
+
+.entity-element.editing .edit-input {
+    flex: 1;
+    padding: 0.75rem 1rem;
+    font-family: 'Space Grotesk', system-ui, sans-serif;
+    font-size: 1rem;
+    font-weight: 500;
+    color: #2d2a4a;
+    background-color: #fff;
+    border: 2px solid #e85d4c;
+    outline: none;
+    caret-color: #e85d4c;
 }
 

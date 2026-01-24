@@ -17,7 +17,7 @@
         <div class="side-column">
             <div class="side-menu is-collapsed">
                 <ul>
-                    <li hx-get="api/olympiads" hx-trigger="click" hx-target="#main-content">Olimpiadi</li>
+                    <li hx-get="api/olympiads" hx-trigger="click, load" hx-target="#main-content">Olimpiadi</li>
                     <li hx-get="api/events" hx-trigger="click" hx-target="#main-content">Eventi</li>
                     <li hx-get="api/players" hx-trigger="click" hx-target="#main-content">Giocatori</li>
                 </ul>
@@ -36,15 +36,6 @@
     document.querySelector('.hamburger').addEventListener('click', function() {
         this.classList.toggle('is-active');
         document.querySelector('.side-menu').classList.toggle('is-collapsed');
-    });
-
-    // After PIN validation, re-submit the original form that triggered the PIN prompt
-    document.body.addEventListener('retryPendingAction', function() {
-        // The original form is still in #main-content with user's data filled in
-        const pendingForm = document.querySelector('#main-content form');
-        if (pendingForm) {
-            pendingForm.requestSubmit();
-        }
     });
 </script>
 </html>
