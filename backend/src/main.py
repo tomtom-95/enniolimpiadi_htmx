@@ -207,7 +207,7 @@ async def get_edit_textbox(
                 )
                 conn.commit()
 
-        item = {"id": row["id"], "name": row["name"], "version": row["version"]},
+        item = {"id": row["id"], "name": row["name"], "version": row["version"]}
         entity_html = templates.get_template("entity_rename_oob.html").render(item=item, entities=entities.value)
         badge_oob = get_badge_oob(session_id, conn)
         return HTMLResponse(entity_html + badge_oob)
