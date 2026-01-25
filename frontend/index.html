@@ -33,7 +33,7 @@
     // on load to retrieve the name of the selected olympiad (if any)
 
     // TODO: I thought this would happen on press but it seems to happen on release
-    document.querySelector('.hamburger').addEventListener('click', function() {
+    document.querySelector('.hamburger').addEventListener('mousedown', function() {
         this.classList.toggle('is-active');
         document.querySelector('.side-menu').classList.toggle('is-collapsed');
     });

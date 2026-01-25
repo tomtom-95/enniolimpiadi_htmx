@@ -382,6 +382,57 @@ body {
 }
 
 /*
+ * Entity deleted message
+ */
+.entity-deleted-message {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    margin-bottom: 0.5rem;
+    background-color: #fff3cd;
+    border-left: 4px solid #ffc107;
+    color: #856404;
+    font-weight: 500;
+    font-style: italic;
+    overflow: scroll;
+    max-height: 100px;
+    opacity: 1;
+    transition: max-height 200ms ease-out, opacity 200ms ease-out, margin-bottom 200ms ease-out, padding 200ms ease-out;
+}
+
+.entity-deleted-message.removing {
+    max-height: 0;
+    opacity: 0;
+    margin-bottom: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+}
+
+.entity-deleted-message span {
+    white-space: nowrap;
+    overflow-x: auto;
+    flex: 1;
+    min-width: 0;
+}
+
+.entity-deleted-message .dismiss-btn {
+    flex-shrink: 0;
+    margin-left: 1rem;
+    padding: 0.25rem 0.75rem;
+    font-size: 0.875rem;
+    color: #856404;
+    background-color: transparent;
+    border: 1px solid #856404;
+    border-radius: 4px;
+    transition: background-color 0.2s ease;
+}
+
+.entity-deleted-message .dismiss-btn:hover {
+    background-color: rgba(133, 100, 4, 0.1);
+}
+
+/*
  * Modal
  */
 #modal-container:empty {
@@ -514,4 +565,61 @@ body {
     outline: none;
     caret-color: #e85d4c;
 }
+
+/*
+ * Utility classes
+ */
+.hidden {
+    display: none !important;
+}
+
+/*
+ * Entity rename message
+ */
+.entity-rename-message {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    background-color: #d1ecf1;
+    border-left: 4px solid #17a2b8;
+    color: #0c5460;
+    font-weight: 500;
+    font-style: italic;
+    overflow: scroll;
+    max-height: 100px;
+    opacity: 1;
+    transition: max-height 200ms ease-out, opacity 200ms ease-out, padding 200ms ease-out;
+}
+
+.entity-rename-message.removing {
+    max-height: 0;
+    opacity: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+}
+
+.entity-rename-message span {
+    white-space: nowrap;
+    overflow-x: auto;
+    flex: 1;
+    min-width: 0;
+}
+
+.entity-rename-message .dismiss-btn {
+    flex-shrink: 0;
+    margin-left: 1rem;
+    padding: 0.25rem 0.75rem;
+    font-size: 0.875rem;
+    color: #0c5460;
+    background-color: transparent;
+    border: 1px solid #0c5460;
+    border-radius: 4px;
+    transition: background-color 0.2s ease;
+}
+
+.entity-rename-message .dismiss-btn:hover {
+    background-color: rgba(12, 84, 96, 0.1);
+}
+
 

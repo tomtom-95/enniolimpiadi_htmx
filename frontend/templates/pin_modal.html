@@ -1,6 +1,6 @@
 <div id="modal" _="on closeModal remove me">
 	<div class="modal-underlay" _="on click trigger closeModal"></div>
-    <div class="modal-content">
+    <div class="modal-content" _="on click halt the event's bubbling">
         <h3>Inserisci PIN</h3>
         {% if error %}
             <div class="error-banner">{{ error }}</div>
@@ -8,6 +8,7 @@
         <form hx-post="{{ action }}" hx-target="#main-content" _="on htmx:afterRequest trigger closeModal">
             {% if name %}<input type="hidden" name="name" value="{{ name }}">{% endif %}
             {% if olympiad_id %}<input type="hidden" name="olympiad_id" value="{{ olympiad_id }}">{% endif %}
+            {% if callback_params %}<input type="hidden" name="callback_params" value="{{ callback_params }}">{% endif %}
             <input type="hidden" name="pin" id="pin-hidden" value="{{ pin | default('') }}">
             <div class="pin-input-container">
                 <input type="text" inputmode="numeric" maxlength="1" class="pin-digit" autofocus>
@@ -16,8 +17,12 @@
                 <input type="text" inputmode="numeric" maxlength="1" class="pin-digit">
             </div>
             <div class="modal-actions">
-                <button type="button" class="btn-cancel" _="on click trigger closeModal">Annulla</button>
-                <button type="submit" class="btn-submit">Conferma</button>
+                <button type="button" class="btn-cancel" _="on click trigger closeModal">
+                    Annulla
+                </button>
+                <button type="submit" class="btn-submit">
+                    Conferma
+                </button>
             </div>
         </form>
         <script>
