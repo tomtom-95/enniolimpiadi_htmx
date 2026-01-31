@@ -6,9 +6,9 @@
             <div class="error-banner">{{ error }}</div>
         {% endif %}
         <form hx-post="{{ action }}" hx-target="#main-content" _="on htmx:afterRequest trigger closeModal on body">
-            {% if name %}<input type="hidden" name="name" value="{{ name }}">{% endif %}
-            {% if olympiad_id %}<input type="hidden" name="olympiad_id" value="{{ olympiad_id }}">{% endif %}
-            {% if on_success %}<input type="hidden" name="on_success" value="{{ on_success }}">{% endif %}
+            <input type="hidden" name="action_type" value="{{ action_type }}">
+            <input type="hidden" name="olympiad_id" value="{{ olympiad_id }}">
+            <input type="hidden" name="params" value='{{ params | tojson }}'>
             <input type="hidden" name="pin" id="pin-hidden" value="{{ pin | default('') }}">
             <div class="pin-input-container">
                 <input type="text" inputmode="numeric" maxlength="1" class="pin-digit" autofocus>

@@ -23,15 +23,11 @@
                 </ul>
             </div>
         </div>
-        <div id="olympiad-badge-container">Olympiad badge</div>
+        <div id="olympiad-badge-container" hx-get="/api/badge" hx-trigger="load, badgeChanged from:body">Olympiad badge</div>
         <div id="main-content"></div>
         <div id="modal-container"></div>
     </body>
 <script>
-    // TODO: when reloading the name on olympiad badge container is reset even if an olympiad_id is
-    // actually selected for the session in the db, to fix it we should call a retrieve_badge endpoint
-    // on load to retrieve the name of the selected olympiad (if any)
-
     // TODO: I thought this would happen on press but it seems to happen on release
     document.querySelector('.hamburger').addEventListener('mousedown', function() {
         this.classList.toggle('is-active');

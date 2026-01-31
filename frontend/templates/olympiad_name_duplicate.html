@@ -1,4 +1,15 @@
-<div class="error-state">
-    <p>Un'olimpiade con questo nome esiste già</p>
-    <button hx-get="/api/olympiads" hx-target="#main-content">Torna alla lista</button>
+<div id="modal" _="on closeModal from body remove me">
+	<div class="modal-underlay" _="on click trigger closeModal on body"></div>
+    <div class="modal-content" _="on click halt the event's bubbling">
+        <h3>Errore</h3>
+        <p>Un'olimpiade con questo nome esiste già.</p>
+        <div class="modal-actions">
+            <button type="button" class="btn-cancel" _="on click trigger closeModal on body">
+                Chiudi
+            </button>
+            <button type="button" class="btn-submit" onclick="location.reload()">
+                Ricarica pagina
+            </button>
+        </div>
+    </div>
 </div>
