@@ -2,8 +2,4 @@
     <span>Elemento rinominato "{{ item.name }}" da un altro admin</span>
     <button class="dismiss-btn" type="button">Ok</button>
 </div>
-{% set hx_target = "#main-content" %}
 {% include "entity_element.html" %}
-{% if rename_badge %}
-<div id="olympiad-badge-container" hx-swap-oob="innerHTML">{{ item.name }}</div>
-{% endif %}

@@ -1,6 +1,6 @@
 <div id="{{ entities }}-{{ id }}" class="entity-element editing"
-    hx-get="/api/{{ entities }}/{{ id }}/{{ version }}/cancel-edit" hx-target="#{{ entities }}-{{ id }}" hx-swap="outerHTML" hx-trigger="closeEdit"
-    _="on click elsewhere or keyup[key=='Escape'] from window trigger closeEdit">
+    hx-get="/api/{{ entities }}/{{ id }}/{{ version }}/cancel-edit?name={{ curr_name }}" hx-target="#{{ entities }}-{{ id }}"
+    hx-swap="outerHTML" hx-trigger="closeEdit" _="on click elsewhere or keyup[key=='Escape'] from window trigger closeEdit">
     <form class="edit-form" hx-put="/api/{{ entities }}/{{ id }}/{{ version }}"
         hx-target="#{{ entities }}-{{ id }}" hx-swap="outerHTML">
         <input type="text" name="name" value="{{ curr_name }}" class="edit-input" autofocus required

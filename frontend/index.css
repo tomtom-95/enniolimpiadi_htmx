@@ -237,12 +237,24 @@ body {
     background-color: #fff;
     border-left: 4px solid #e85d4c;
     cursor: pointer;
-    transition: background-color 0.2s ease, border-left-color 0.2s ease;
+    max-height: 100px;
+    overflow: hidden;
+    transition: background-color 0.2s ease, border-left-color 0.2s ease,
+                max-height 200ms ease-out, opacity 200ms ease-out,
+                margin-bottom 200ms ease-out, padding 200ms ease-out;
 }
 
 .entity-element:hover {
     background-color: #f5f0e6;
     border-left-color: #c94a3a;
+}
+
+.entity-element.removing {
+    max-height: 0;
+    opacity: 0;
+    margin-bottom: 0;
+    padding-top: 0;
+    padding-bottom: 0;
 }
 
 .item-icons {

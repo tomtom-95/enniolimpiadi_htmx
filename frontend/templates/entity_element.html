@@ -2,11 +2,12 @@
     hx-get="/api/{{ entities }}/{{ item.id }}/{{ item.version }}" hx-target="{{ hx_target }}" hx-trigger="mousedown">
     <div class="item">{{ item.name }}</div>
     <div class="item-icons">
-        <button class="item-rename" aria-label="Rename" hx-get="/api/edit/{{ entities }}/{{ item.id }}/{{ item.version }}"
+        <button class="item-rename" aria-label="Rename"
+            hx-get="/api/{{ entities }}/{{ item.id }}/{{ item.version }}/edit?name={{ item.name }}"
             hx-target="#{{ entities }}-{{ item.id }}" hx-trigger="mousedown consume" hx-swap="outerHTML">
         </button>
         <button class="item-delete" aria-label="Delete" hx-delete="/api/{{ entities }}/{{ item.id }}/{{ item.version }}"
-            hx-target="#{{ entities }}-{{ item.id }}" hx-trigger="mousedown consume" hx-swap="outerHTML">
+            hx-target="#{{ entities }}-{{ item.id }}" hx-trigger="click" hx-swap="outerHTML" hx-on:mousedown="event.stopPropagation()">
         </button>
     </div>
 </div>
