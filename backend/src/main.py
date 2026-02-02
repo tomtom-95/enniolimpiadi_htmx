@@ -99,6 +99,7 @@ def diagnose_entity_noop(
             conn.commit()
             response = templates.TemplateResponse(request, "olympiad_not_found.html")
             response.headers["HX-Retarget"] = "#main-content"
+            response.headers["HX-Reswap"] = "innerHTML"
             trigger_badge_update(response)
             return response
 
@@ -112,7 +113,7 @@ def diagnose_entity_noop(
     # Case 2: Version mismatch - entity was modified
     if diag["current_version"] != expected_version:
         item = {"id": entity_id, "name": diag["current_name"], "version": diag["current_version"]}
-        html_content = templates.get_template("entity_rename_oob.html").render(
+        html_content = templates.get_template("entity_renamed_oob.html").render(
             item=item, entities=entities.value, hx_target="#main-content"
         )
         response = HTMLResponse(html_content)
@@ -191,7 +192,7 @@ def diagnose_olympiad_noop(
             conn.commit()
 
         item = {"id": olympiad_id, "name": diag["current_name"], "version": diag["current_version"]}
-        html_content = templates.get_template("entity_rename_oob.html").render(
+        html_content = templates.get_template("entity_renamed_oob.html").render(
             item=item, entities="olympiads", hx_target="#olympiad-badge-container"
         )
         response = HTMLResponse(html_content)
@@ -348,6 +349,7 @@ async def cancel_edit(
 
 @app.get("/api/{entities}")
 async def list_entities(request: Request, entities: EntityType, conn = Depends(get_db)):
+    # TODO: handle the case in which the olympiad has been eliminated, right now just the message "of selected_olympiad_required.html appears"
     session_id = request.state.session_id
 
     items = conn.execute(
