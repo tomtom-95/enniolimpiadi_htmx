@@ -456,6 +456,134 @@ async def select_olympiad(
         {"olympiad": {"id": olympiad["id"], "name": olympiad["name"], "version": olympiad["version"]}}
     )
 
+def _build_mock_stages(player_names):
+    """Build hardcoded mock tournament stages for the event page prototype."""
+    p1 = player_names[0] if len(player_names) >= 1 else "Giocatore 1"
+    p2 = player_names[1] if len(player_names) >= 2 else "Giocatore 2"
+    p3 = player_names[2] if len(player_names) >= 3 else "Giocatore 3"
+
+    return [
+        {
+            "name": "Fase a Gironi",
+            "kind": "groups",
+            "groups": [
+                {
+                    "name": "Girone A",
+                    "participants": [p1, p2],
+                    "matches": [
+                        {"p1": p1, "p2": p2, "score": "2 - 1"},
+                    ]
+                },
+                {
+                    "name": "Girone B",
+                    "participants": [p3],
+                    "matches": []
+                }
+            ]
+        },
+        {
+            "name": "Eliminazione Diretta",
+            "kind": "single_elimination",
+            "rounds": [
+                {
+                    "name": "Semifinale",
+                    "matches": [
+                        {"p1": p1, "p2": p3, "score": "- vs -"},
+                    ]
+                },
+                {
+                    "name": "Finale",
+                    "matches": [
+                        {"p1": "?", "p2": "?", "score": "- vs -"},
+                    ]
+                }
+            ]
+        }
+    ]
+
+
+@app.get("/api/events/{event_id}/{event_version}")
+async def select_event(
+    request: Request,
+    event_id: int,
+    event_version: int,
+    conn = Depends(get_db)
+):
+    session_id = request.state.session_id
+    session_data = get_session_data(conn, session_id)
+    olympiad_id = session_data["selected_olympiad_id"]
+
+    event = conn.execute(
+        "SELECT id, name, version, status, score_kind FROM events WHERE id = ? AND olympiad_id = ?",
+        (event_id, olympiad_id)
+    ).fetchone()
+
+    if not event:
+        return HTMLResponse("<div class='error-banner'>Evento non trovato</div>")
+
+    all_players = conn.execute(
+        "SELECT id, name FROM players WHERE olympiad_id = ? ORDER BY name",
+        (olympiad_id,)
+    ).fetchall()
+
+    all_players_list = [{"id": p["id"], "name": p["name"]} for p in all_players]
+    # MOCK: pad enrolled players to 20 with fake names
+    enrolled_players = all_players_list[:]
+    for i in range(len(enrolled_players) + 1, 21):
+        enrolled_players.append({"id": 1000 + i, "name": f"Giocatore {i}"})
+    available_players = []
+
+    enrolled_names = [p["name"] for p in enrolled_players]
+    stages = _build_mock_stages(enrolled_names)
+
+    return templates.TemplateResponse(
+        request, "event_page.html",
+        {
+            "event": {"id": event["id"], "name": event["name"], "version": event["version"],
+                       "status": event["status"], "score_kind": event["score_kind"]},
+            "enrolled_players": enrolled_players,
+            "available_players": available_players,
+            "stages": stages,
+            "current_stage_index": 0,
+            "total_stages": len(stages),
+            "event_id": event["id"],
+        }
+    )
+
+
+@app.get("/api/events/{event_id}/stage/{stage_index}")
+async def get_event_stage(
+    request: Request,
+    event_id: int,
+    stage_index: int,
+    conn = Depends(get_db)
+):
+    session_id = request.state.session_id
+    session_data = get_session_data(conn, session_id)
+    olympiad_id = session_data["selected_olympiad_id"]
+
+    all_players = conn.execute(
+        "SELECT name FROM players WHERE olympiad_id = ? ORDER BY name",
+        (olympiad_id,)
+    ).fetchall()
+
+    enrolled_names = [p["name"] for p in all_players[:3]]
+    stages = _build_mock_stages(enrolled_names)
+
+    if stage_index < 0 or stage_index >= len(stages):
+        return HTMLResponse("<div class='error-banner'>Fase non trovata</div>")
+
+    return templates.TemplateResponse(
+        request, "event_stage.html",
+        {
+            "stage": stages[stage_index],
+            "current_stage_index": stage_index,
+            "total_stages": len(stages),
+            "event_id": event_id,
+        }
+    )
+
+
 @app.post("/api/olympiads")
 async def create_olympiad(
     request: Request,
@@ -801,10 +929,10 @@ async def _dispatch_action(request: Request, action_type: str, olympiad_id: int,
         response = await rename_olympiad(request, olympiad_id, params["version"], params["name"], conn)
     elif action_type == "delete_olympiad":
         response = await delete_olympiad(request, olympiad_id, params["version"], conn)
-    elif action_type == "delete_players" | "delete_teams" | "delete_events":
+    elif action_type == "delete_players" or action_type == "delete_teams" or action_type == "delete_events":
         entities = EntityType(params["entities"])
         response = await delete_entity(request, entities, params["entity_id"], params["version"], conn)
-    elif action_type == "rename_players" | "rename_teams" | "rename_events":
+    elif action_type == "rename_players" or action_type == "rename_teams" or action_type == "rename_events":
         entities = EntityType(params["entities"])
         response = await rename_entity(request, entities, params["entity_id"], params["version"], params["name"], conn)
     else:

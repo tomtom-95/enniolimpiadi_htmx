@@ -1,0 +1,12 @@
+{% if available_players %}
+<div class="available-players-list">
+    {% for player in available_players %}
+    <div class="available-player">
+        <span>{{ player.name }}</span>
+        <button class="btn-enroll" title="Iscrivi">+</button>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<p class="no-players-msg">Tutti i giocatori sono già iscritti</p>
+{% endif %}

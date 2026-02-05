@@ -1,0 +1,56 @@
+<div class="event-page">
+    <h2 class="event-title">{{ event.name }}</h2>
+    <div class="event-status-badge {{ event.status }}">{{ event.status }}</div>
+
+    <div class="event-layout">
+        <div class="event-players-panel">
+            <h3>Giocatori Iscritti</h3>
+            {% set preview_count = 3 %}
+            <div id="enrolled-players-list">
+                {% if not enrolled_players %}
+                <p class="no-players-msg">Nessun giocatore iscritto</p>
+                {% else %}
+                    {% for player in enrolled_players[:preview_count] %}
+                    <div class="enrolled-player">
+                        <span>{{ player.name }}</span>
+                    </div>
+                    {% endfor %}
+                    {% if enrolled_players | length > preview_count %}
+                    <div id="enrolled-players-overflow" class="hidden">
+                        {% for player in enrolled_players[preview_count:] %}
+                        <div class="enrolled-player">
+                            <span>{{ player.name }}</span>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    <button class="btn-show-more"
+                        _="on click toggle .hidden on #enrolled-players-overflow then
+                           if #enrolled-players-overflow matches .hidden
+                             set my textContent to '+{{ enrolled_players | length - preview_count }} altri'
+                           else
+                             set my textContent to 'Mostra meno'
+                           end">
+                        +{{ enrolled_players | length - preview_count }} altri
+                    </button>
+                    {% endif %}
+                {% endif %}
+            </div>
+
+            <button class="btn-add-player"
+                _="on click toggle .hidden on #available-players-dropdown">
+                + Aggiungi Giocatore
+            </button>
+
+            <div id="available-players-dropdown" class="hidden">
+                {% include 'event_available_players.html' %}
+            </div>
+        </div>
+
+        <div class="event-stages-panel">
+            <div id="stage-content">
+                {% set stage = stages[current_stage_index] %}
+                {% include 'event_stage.html' %}
+            </div>
+        </div>
+    </div>
+</div>

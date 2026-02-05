@@ -1,0 +1,67 @@
+<div class="stage-nav">
+    <button class="stage-arrow"
+        {% if current_stage_index > 0 %}
+        hx-get="/api/events/{{ event_id }}/stage/{{ current_stage_index - 1 }}"
+        hx-target="#stage-content"
+        hx-swap="innerHTML"
+        {% else %}
+        disabled
+        {% endif %}>
+        &#8592;
+    </button>
+    <span class="stage-indicator">
+        {{ stage.name }} ({{ current_stage_index + 1 }}/{{ total_stages }})
+    </span>
+    <button class="stage-arrow"
+        {% if current_stage_index < total_stages - 1 %}
+        hx-get="/api/events/{{ event_id }}/stage/{{ current_stage_index + 1 }}"
+        hx-target="#stage-content"
+        hx-swap="innerHTML"
+        {% else %}
+        disabled
+        {% endif %}>
+        &#8594;
+    </button>
+</div>
+
+{% if stage.kind == "groups" %}
+<div class="stage-groups">
+    {% for group in stage.groups %}
+    <div class="group-card">
+        <h4>{{ group.name }}</h4>
+        <div class="group-participants">
+            {% for p in group.participants %}
+            <div class="group-participant">{{ p }}</div>
+            {% endfor %}
+        </div>
+        {% if group.matches %}
+        <div class="group-matches">
+            {% for match in group.matches %}
+            <div class="match-row">
+                <span class="match-p1">{{ match.p1 }}</span>
+                <span class="match-score">{{ match.score }}</span>
+                <span class="match-p2">{{ match.p2 }}</span>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+
+{% elif stage.kind == "single_elimination" %}
+<div class="stage-bracket">
+    {% for round in stage.rounds %}
+    <div class="bracket-round">
+        <h4>{{ round.name }}</h4>
+        {% for match in round.matches %}
+        <div class="bracket-match">
+            <div class="bracket-participant bracket-top">{{ match.p1 }}</div>
+            <div class="bracket-score">{{ match.score }}</div>
+            <div class="bracket-participant bracket-bottom">{{ match.p2 }}</div>
+        </div>
+        {% endfor %}
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
