@@ -797,24 +797,23 @@ async def validate_pin(
 
 async def _dispatch_action(request: Request, action_type: str, olympiad_id: int, params: dict, conn):
     """Dispatch to the actual endpoint function after PIN validation."""
-    match action_type:
-        case "rename_olympiad":
-            response = await rename_olympiad(request, olympiad_id, params["version"], params["name"], conn)
-        case "delete_olympiad":
-            response = await delete_olympiad(request, olympiad_id, params["version"], conn)
-        case "delete_players" | "delete_teams" | "delete_events":
-            entities = EntityType(params["entities"])
-            response = await delete_entity(request, entities, params["entity_id"], params["version"], conn)
-        case "rename_players" | "rename_teams" | "rename_events":
-            entities = EntityType(params["entities"])
-            response = await rename_entity(request, entities, params["entity_id"], params["version"], params["name"], conn)
-        case _:
-            response = HTMLResponse("")
-            response.headers["HX-Reswap"] = "none"
+    if action_type == "rename_olympiad":
+        response = await rename_olympiad(request, olympiad_id, params["version"], params["name"], conn)
+    elif action_type == "delete_olympiad":
+        response = await delete_olympiad(request, olympiad_id, params["version"], conn)
+    elif action_type == "delete_players" | "delete_teams" | "delete_events":
+        entities = EntityType(params["entities"])
+        response = await delete_entity(request, entities, params["entity_id"], params["version"], conn)
+    elif action_type == "rename_players" | "rename_teams" | "rename_events":
+        entities = EntityType(params["entities"])
+        response = await rename_entity(request, entities, params["entity_id"], params["version"], params["name"], conn)
+    else:
+        response = HTMLResponse("")
+        response.headers["HX-Reswap"] = "none"
 
     response.headers["HX-Trigger-After-Settle"] = "closeModal"
     return response
 
 
 if __name__ == "__main__":
-    uvicorn.run("src.main:app", reload=True, host="0.0.0.0", port=8000)
+    uvicorn.run("src.main:app", reload=True, host="0.0.0.0", port=8080)
