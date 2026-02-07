@@ -28,23 +28,59 @@
 <div class="stage-groups">
     {% for group in stage.groups %}
     <div class="group-card">
-        <h4>{{ group.name }}</h4>
-        <div class="group-participants">
-            {% for p in group.participants %}
-            <div class="group-participant">{{ p }}</div>
-            {% endfor %}
+        <div class="group-header"
+             _="on click toggle .collapsed on closest .group-card">
+            <h4>{{ group.name }}</h4>
+            <span class="group-toggle">&#9662;</span>
         </div>
-        {% if group.matches %}
+
+        {% if group.layout == "cards" %}
         <div class="group-matches">
             {% for match in group.matches %}
-            <div class="match-row">
-                <span class="match-p1">{{ match.p1 }}</span>
-                <span class="match-score">{{ match.score }}</span>
-                <span class="match-p2">{{ match.p2 }}</span>
+            <div class="match-card {% if match.score %}has-score{% endif %}">
+                <span class="match-card-p">{{ match.p1 }}</span>
+                <span class="match-card-score">{{ match.score if match.score else "–" }}</span>
+                <span class="match-card-p">{{ match.p2 }}</span>
             </div>
             {% endfor %}
         </div>
+
+        {% elif group.layout == "grid" %}
+        {% set ps = group.participants %}
+        {% set n = ps | length %}
+        <div class="group-grid-wrap">
+            <div class="grid-row-labels">
+                <div class="grid-col-header-spacer"></div>
+                {% for i in range(0, n) %}
+                <div class="grid-row-header">{{ ps[i] }}</div>
+                {% endfor %}
+            </div>
+            <div class="grid-scroll">
+                <div class="grid-scores"
+                     style="grid-template-columns: repeat({{ n }}, 1fr);">
+                    {% for j in range(0, n) %}
+                    <div class="grid-col-header">{{ ps[j] }}</div>
+                    {% endfor %}
+
+                    {% for i in range(0, n) %}
+                    {% for j in range(0, n) %}
+                        {% if i == j %}
+                            <div class="grid-cell self">&#10005;</div>
+                        {% elif j > i %}
+                            {% set score = group.scores.get(ps[i], {}).get(ps[j]) %}
+                            <div class="grid-cell {% if score %}has-score{% endif %}">
+                                {{ score if score else "–" }}
+                            </div>
+                        {% else %}
+                            <div class="grid-cell empty"></div>
+                        {% endif %}
+                    {% endfor %}
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
         {% endif %}
+
     </div>
     {% endfor %}
 </div>

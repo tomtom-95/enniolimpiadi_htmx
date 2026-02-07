@@ -44,11 +44,24 @@ button {
 
 body {
     display: flex;
+    flex-direction: column;
     overflow-x: hidden;
 }
 
-.side-column {
+.top-bar {
     display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+    padding-right: 15px;
+    background-color: #e85d4c;
+    border-bottom: 2px solid #c94a3a;
+}
+
+.content-area {
+    display: flex;
+    flex: 1;
+    min-height: 0;
 }
 
 #main-content {
@@ -58,7 +71,7 @@ body {
     min-width: 0;
     overflow-x: hidden;
     overflow-y: auto;
-    padding: 70px 15px 20px;
+    padding: 15px;
 }
 
 /*
@@ -67,10 +80,10 @@ body {
 .side-menu {
     display: flex;
     width: 150px;
+    flex-shrink: 0;
     overflow: hidden;
     transition: width 0.3s ease;
     background-color: #e85d4c;
-    padding-top: 100px;
 }
 
 .side-menu.is-collapsed {
@@ -111,7 +124,6 @@ body {
  * @link https://github.com/jonsuh/hamburgers
  */
 .hamburger {
-    position: absolute;
     display: inline-block;
     margin: 0;
     padding: 15px;
@@ -126,7 +138,7 @@ body {
 }
 
 .hamburger-inner, .hamburger-inner:after, .hamburger-inner:before {
-    background-color: #2d2a4a
+    background-color: #fff
 }
 
 .hamburger-box {
@@ -150,7 +162,7 @@ body {
     transition-duration: .15s;
     transition-property: transform;
     border-radius: 4px;
-    background-color: #2d2a4a
+    background-color: #fff
 }
 
 .hamburger-inner:after,.hamburger-inner:before {
@@ -264,7 +276,7 @@ body {
     background-color: #fff;
     border-left: 4px solid #e85d4c;
     cursor: pointer;
-    max-height: 100px;
+    flex-shrink: 0;
     overflow: hidden;
     transition: background-color 0.2s ease, border-left-color 0.2s ease,
                 max-height 200ms ease-out, opacity 200ms ease-out,
@@ -366,9 +378,6 @@ body {
  * Olympiad badge
  */
 #olympiad-badge-container {
-    position: absolute;
-    top: 15px;
-    right: 15px;
     padding: 8px 16px;
     background-color: #2d2a4a;
     color: #faf5eb;
@@ -668,7 +677,6 @@ body {
 .event-page {
     display: flex;
     flex-direction: column;
-    height: 100%;
 }
 
 .event-title {
@@ -870,66 +878,193 @@ body {
 }
 
 /*
- * Groups stage
+ * Groups stage — collapsible groups with match cards
  */
 .stage-groups {
     display: flex;
+    flex-direction: column;
     gap: 1rem;
-    flex-wrap: wrap;
 }
 
 .group-card {
-    flex: 1;
-    min-width: 200px;
     background-color: #fff;
     border-radius: 4px;
-    padding: 1rem;
     border-top: 3px solid #e85d4c;
+    overflow-x: auto;
 }
 
-.group-card h4 {
-    margin: 0 0 0.75rem 0;
-    color: #2d2a4a;
-}
-
-.group-participant {
-    padding: 0.3rem 0.5rem;
-    margin-bottom: 0.25rem;
-    background-color: #faf5eb;
-    border-radius: 2px;
-    font-size: 0.9rem;
-}
-
-.group-matches {
-    margin-top: 0.75rem;
-    border-top: 1px solid #eee;
-    padding-top: 0.5rem;
-}
-
-.match-row {
+.group-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0.4rem 0;
+    padding: 0.75rem 1rem;
+    cursor: pointer;
+    user-select: none;
+}
+
+.group-header h4 {
+    margin: 0;
+    color: #2d2a4a;
+}
+
+.group-toggle {
+    font-size: 1rem;
+    color: #2d2a4a;
+    transition: transform 0.2s;
+}
+
+.group-card.collapsed .group-toggle {
+    transform: rotate(-90deg);
+}
+
+.group-matches {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.5rem;
+    padding: 0 1rem 1rem;
+}
+
+.group-card.collapsed .group-matches {
+    display: none;
+}
+
+.match-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.2rem;
+    padding: 0.5rem;
+    border-radius: 4px;
+    background-color: #faf5eb;
+    cursor: pointer;
+}
+
+.match-card.has-score {
+    background-color: #f0ebe0;
+}
+
+.match-card:hover {
+    background-color: #e85d4c22;
+}
+
+.match-card-p {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #2d2a4a;
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+}
+
+.match-card-score {
     font-size: 0.85rem;
-}
-
-.match-p1, .match-p2 {
-    flex: 1;
-}
-
-.match-p2 {
-    text-align: right;
-}
-
-.match-score {
-    padding: 0.2rem 0.5rem;
+    font-weight: 700;
+    padding: 0.15rem 0.5rem;
+    border-radius: 2px;
     background-color: #2d2a4a;
     color: #faf5eb;
-    border-radius: 2px;
+}
+
+.match-card:not(.has-score) .match-card-score {
+    background-color: transparent;
+    color: #999;
+}
+
+/*
+ * Groups stage — upper triangle grid layout
+ * Two-column structure: fixed row labels | scrollable score grid
+ */
+.group-grid-wrap {
+    display: flex;
+    padding: 0 1rem 1rem;
+}
+
+.group-card.collapsed .group-grid-wrap {
+    display: none;
+}
+
+/* Left column: fixed row labels */
+.grid-row-labels {
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.grid-col-header-spacer {
+    height: 2.2rem;
+}
+
+.grid-row-header {
+    display: flex;
+    align-items: center;
+    height: 2.2rem;
+    font-size: 0.85rem;
     font-weight: 600;
-    font-size: 0.8rem;
+    color: #2d2a4a;
+    padding-right: 0.75rem;
     white-space: nowrap;
+}
+
+/* Right column: horizontally scrollable */
+.grid-scroll {
+    overflow-x: auto;
+    flex: 1;
+    min-width: 0;
+}
+
+.grid-scores {
+    display: grid;
+    gap: 2px;
+    width: max-content;
+}
+
+.grid-col-header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 2.2rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #2d2a4a;
+    white-space: nowrap;
+    min-width: 3rem;
+}
+
+.grid-cell {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 3rem;
+    height: 2.2rem;
+    border-radius: 3px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #999;
+    background-color: #f5f0e6;
+    cursor: default;
+}
+
+.grid-cell.self {
+    background-color: #e0dbd2;
+    color: #b0a99e;
+    cursor: not-allowed;
+}
+
+.grid-cell.has-score {
+    background-color: #2d2a4a;
+    color: #faf5eb;
+    cursor: pointer;
+}
+
+.grid-cell.has-score:hover {
+    background-color: #e85d4c;
+}
+
+.grid-cell.empty {
+    background: none;
 }
 
 /*

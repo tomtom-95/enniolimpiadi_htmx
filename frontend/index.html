@@ -9,12 +9,15 @@
         <script src="https://unpkg.com/hyperscript.org@0.9.13"></script>
     </head>
     <body>
-        <div class="hamburger">
-            <div class="hamburger-box">
-                <div class="hamburger-inner"></div>
+        <div class="top-bar">
+            <div class="hamburger">
+                <div class="hamburger-box">
+                    <div class="hamburger-inner"></div>
+                </div>
             </div>
+            <div id="olympiad-badge-container" hx-get="/api/badge" hx-trigger="load, badgeChanged from:body">Olympiad badge</div>
         </div>
-        <div class="side-column">
+        <div class="content-area">
             <div class="side-menu is-collapsed">
                 <ul>
                     <li hx-get="api/olympiads" hx-trigger="click, load" hx-target="#main-content">Olimpiadi</li>
@@ -22,9 +25,8 @@
                     <li hx-get="api/players" hx-trigger="click" hx-target="#main-content">Giocatori</li>
                 </ul>
             </div>
+            <div id="main-content"></div>
         </div>
-        <div id="olympiad-badge-container" hx-get="/api/badge" hx-trigger="load, badgeChanged from:body">Olympiad badge</div>
-        <div id="main-content"></div>
         <div id="modal-container"></div>
     </body>
 <script>

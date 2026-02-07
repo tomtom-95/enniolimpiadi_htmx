@@ -458,9 +458,26 @@ async def select_olympiad(
 
 def _build_mock_stages(player_names):
     """Build hardcoded mock tournament stages for the event page prototype."""
-    p1 = player_names[0] if len(player_names) >= 1 else "Giocatore 1"
-    p2 = player_names[1] if len(player_names) >= 2 else "Giocatore 2"
-    p3 = player_names[2] if len(player_names) >= 3 else "Giocatore 3"
+    names = player_names + [f"Giocatore {i}" for i in range(len(player_names) + 1, 17)]
+    p = names[:16]
+
+    def make_round_robin(players):
+        matches = []
+        mock_scores = ["2 - 1", "3 - 0", "1 - 1", "0 - 2", "0 - 1", "2 - 2", "1 - 3", None]
+        idx = 0
+        for i in range(len(players)):
+            for j in range(i + 1, len(players)):
+                matches.append({"p1": players[i], "p2": players[j], "score": mock_scores[idx % len(mock_scores)]})
+                idx += 1
+        return matches
+
+    def matches_to_scores(matches):
+        scores = {}
+        for m in matches:
+            scores.setdefault(m["p1"], {})[m["p2"]] = m["score"]
+        return scores
+
+    matches_b = make_round_robin(p[8:])
 
     return [
         {
@@ -469,15 +486,15 @@ def _build_mock_stages(player_names):
             "groups": [
                 {
                     "name": "Girone A",
-                    "participants": [p1, p2],
-                    "matches": [
-                        {"p1": p1, "p2": p2, "score": "2 - 1"},
-                    ]
+                    "layout": "cards",
+                    "participants": p[:8],
+                    "matches": make_round_robin(p[:8]),
                 },
                 {
                     "name": "Girone B",
-                    "participants": [p3],
-                    "matches": []
+                    "layout": "grid",
+                    "participants": p[8:],
+                    "scores": matches_to_scores(matches_b),
                 }
             ]
         },
@@ -488,7 +505,7 @@ def _build_mock_stages(player_names):
                 {
                     "name": "Semifinale",
                     "matches": [
-                        {"p1": p1, "p2": p3, "score": "- vs -"},
+                        {"p1": p[0], "p2": p[4], "score": "- vs -"},
                     ]
                 },
                 {
