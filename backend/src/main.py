@@ -762,13 +762,18 @@ async def select_event(
         (event_id,)
     ).fetchone()
     max_stage_order = max_stage["max_order"] if max_stage else None
+
     event_status = _derive_event_status(event["current_stage_order"], max_stage_order)
 
     return templates.TemplateResponse(
         request, "event_page.html",
         {
-            "event": {"id": event["id"], "name": event["name"], "version": event["version"],
-                       "status": event_status, "score_kind": event["score_kind"]},
+            "event": {
+                "id": event["id"],
+                "name": event["name"],
+                "version": event["version"],
+                "status": event_status,
+            },
         }
     )
 
@@ -785,13 +790,10 @@ async def get_event_stage(
     ).fetchone()
     current_stage_order = event_row["current_stage_order"] if event_row else None
 
-    max_stage = conn.execute(
-        "SELECT MAX(stage_order) AS max_order FROM event_stages WHERE event_id = ?",
-        (event_id,)
-    ).fetchone()
-    max_stage_order = max_stage["max_order"] if max_stage else None
-    event_status = _derive_event_status(current_stage_order, max_stage_order)
+    # event_status = _derive_event_status(current_stage_order, max_stage_order)
 
+    # TODO: I think I want to get rid of that, I just want to retrieve what I need to pass
+    #       to the template the information it needs for the single event stage I am targeting
     stages = build_stages_from_db(conn, event_id)
 
     if stage_index < 0 or stage_index >= len(stages):
@@ -802,9 +804,9 @@ async def get_event_stage(
         {
             "stage": stages[stage_index],
             "current_stage_index": stage_index,
+            "current_stage_order": current_stage_order,
             "total_stages": len(stages),
-            "event_id": event_id,
-            "event_status": event_status,
+            "event_id": event_id
         }
     )
 
@@ -887,14 +889,20 @@ async def resize_stage_groups(
     stages = build_stages_from_db(conn, event_id)
     stage_index = next(i for i, s in enumerate(stages) if s["id"] == stage_id)
 
+    event_row = conn.execute(
+        "SELECT current_stage_order FROM events WHERE id = ?", (event_id,)
+    ).fetchone()
+    current_stage_order = event_row["current_stage_order"] if event_row else None
+
+
     return templates.TemplateResponse(
         request, "event_stage.html",
         {
             "stage": stages[stage_index],
             "current_stage_index": stage_index,
+            "current_stage_order": current_stage_order,
             "total_stages": len(stages),
-            "event_id": event_id,
-            "event_status": "registration",
+            "event_id": event_id
         }
     )
 

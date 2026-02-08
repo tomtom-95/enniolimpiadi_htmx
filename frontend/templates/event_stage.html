@@ -23,7 +23,7 @@
         {% endif %}
     </div>
 
-    {% if event_status == "registration" and stage.status == "pending" and stage.kind == "groups" and stage.total_participants >= 2 %}
+    {% if current_stage_order == null and stage.kind == "groups" and stage.total_participants >= 2 %}
         {% set num_groups = stage.groups | length %}
         <div class="group-resize-bar">
             <span class="group-resize-label">Numero di gironi:</span>
