@@ -3,6 +3,7 @@ import html
 import json
 import secrets
 from enum import Enum
+from itertools import combinations
 from contextlib import asynccontextmanager
 
 import sqlite3
@@ -459,7 +460,7 @@ async def select_olympiad(
 _ROUND_NAMES = {1: "Finale", 2: "Semifinale", 4: "Quarti di Finale", 8: "Ottavi di Finale"}
 
 
-def _build_groups_stage(conn, stage_id, stage_label):
+def _build_groups_stage(conn, stage_id, stage_label, stage_status):
     """Build a groups/round-robin stage dict from DB data."""
     group_rows = conn.execute(
         "SELECT id FROM groups WHERE event_stage_id = ? ORDER BY id",
@@ -520,10 +521,12 @@ def _build_groups_stage(conn, stage_id, stage_label):
             "scores": scores,
         })
 
-    return {"name": stage_label, "kind": "groups", "groups": groups}
+    total_participants = sum(len(g["participants"]) for g in groups)
+    return {"name": stage_label, "kind": "groups", "groups": groups,
+            "id": stage_id, "status": stage_status, "total_participants": total_participants}
 
 
-def _build_bracket_stage(conn, stage_id, stage_label):
+def _build_bracket_stage(conn, stage_id, stage_label, stage_status):
     """Build a single-elimination stage dict from DB data."""
     from collections import defaultdict, deque
 
@@ -538,7 +541,8 @@ def _build_bracket_stage(conn, stage_id, stage_label):
     ).fetchall()
 
     if not rows:
-        return {"name": stage_label, "kind": "single_elimination", "rounds": []}
+        return {"name": stage_label, "kind": "single_elimination", "rounds": [],
+                "id": stage_id, "status": stage_status}
 
     # Load participants for all these matches
     match_ids = [r["match_id"] for r in rows]
@@ -616,8 +620,13 @@ def _build_bracket_stage(conn, stage_id, stage_label):
             match_dicts.append({"p1": p1, "p2": p2, "score": score})
 
         rounds_list.append({"name": round_name, "matches": match_dicts})
+    
+    res = {
+        "name": stage_label, "kind": "single_elimination", "rounds": rounds_list,
+        "id": stage_id, "status": stage_status
+    }
 
-    return {"name": stage_label, "kind": "single_elimination", "rounds": rounds_list}
+    return res
 
 
 def build_stages_from_db(conn, event_id: int):
@@ -633,9 +642,10 @@ def build_stages_from_db(conn, event_id: int):
     stages = []
     for sr in stage_rows:
         if sr["kind"] in ("groups", "round_robin"):
-            stages.append(_build_groups_stage(conn, sr["id"], sr["name"]))
+            stages.append(_build_groups_stage(conn, sr["id"], sr["name"], sr["status"]))
         elif sr["kind"] == "single_elimination":
-            stages.append(_build_bracket_stage(conn, sr["id"], sr["name"]))
+            stages.append(_build_bracket_stage(conn, sr["id"], sr["name"], sr["status"]))
+
     return stages
 
 
@@ -645,8 +655,6 @@ async def get_event_players(
     event_id: int,
     conn = Depends(get_db)
 ):
-    # TODO: must add the possibility for the user to choose group size
-
     session_id = request.state.session_id
     session_data = get_session_data(conn, session_id)
     olympiad_id = session_data["selected_olympiad_id"]
@@ -690,12 +698,19 @@ async def get_event_players(
     )
 
 
+# I do not really need an api endpoint that retrieves all the stages
+# I just need an endpoint that retrieve one stage
 @app.get("/api/events/{event_id}/stages")
 async def get_event_stages(
     request: Request,
     event_id: int,
     conn = Depends(get_db)
 ):
+    event_row = conn.execute(
+        "SELECT status FROM events WHERE id = ?", (event_id,)
+    ).fetchone()
+    event_status = event_row["status"] if event_row else None
+
     stages = build_stages_from_db(conn, event_id)
 
     if not stages:
@@ -708,6 +723,7 @@ async def get_event_stages(
             "current_stage_index": 0,
             "total_stages": len(stages),
             "event_id": event_id,
+            "event_status": event_status,
         }
     )
 
@@ -747,6 +763,11 @@ async def get_event_stage(
     stage_index: int,
     conn = Depends(get_db)
 ):
+    event_row = conn.execute(
+        "SELECT status FROM events WHERE id = ?", (event_id,)
+    ).fetchone()
+    event_status = event_row["status"] if event_row else None
+
     stages = build_stages_from_db(conn, event_id)
 
     if stage_index < 0 or stage_index >= len(stages):
@@ -759,6 +780,97 @@ async def get_event_stage(
             "current_stage_index": stage_index,
             "total_stages": len(stages),
             "event_id": event_id,
+            "event_status": event_status,
+        }
+    )
+
+
+@app.post("/api/events/{event_id}/stages/{stage_id}/resize")
+async def resize_stage_groups(
+    request: Request,
+    event_id: int,
+    stage_id: int,
+    num_groups: int = Form(...),
+    conn = Depends(get_db)
+):
+    event_row = conn.execute(
+        "SELECT status FROM events WHERE id = ?", (event_id,)
+    ).fetchone()
+    if not event_row or event_row["status"] != "registration":
+        return HTMLResponse("<div class='error-banner'>Resize consentito solo durante la registrazione</div>")
+
+    stage_row = conn.execute(
+        "SELECT id, kind, status FROM event_stages WHERE id = ? AND event_id = ?",
+        (stage_id, event_id)
+    ).fetchone()
+    if not stage_row or stage_row["kind"] not in ("groups", "round_robin") or stage_row["status"] != "pending":
+        return HTMLResponse("<div class='error-banner'>Fase non trovata o già iniziata</div>")
+
+    participant_rows = conn.execute(
+        "SELECT DISTINCT gp.participant_id "
+        "FROM group_participants gp "
+        "JOIN groups g ON g.id = gp.group_id "
+        "WHERE g.event_stage_id = ? "
+        "ORDER BY gp.participant_id",
+        (stage_id,)
+    ).fetchall()
+    participant_ids = [r["participant_id"] for r in participant_rows]
+    total = len(participant_ids)
+
+    if total < 2:
+        return HTMLResponse("<div class='error-banner'>Servono almeno 2 partecipanti</div>")
+
+    num_groups = max(1, min(num_groups, total // 2))
+
+    # Teardown: CASCADE handles group_participants, matches, match_participants, scores
+    conn.execute("DELETE FROM groups WHERE event_stage_id = ?", (stage_id,))
+
+    # Rebuild groups
+    buckets = [[] for _ in range(num_groups)]
+    for i, pid in enumerate(participant_ids):
+        buckets[i % num_groups].append(pid)
+
+    for bucket in buckets:
+        grow = conn.execute(
+            "INSERT INTO groups (event_stage_id) VALUES (?) RETURNING id",
+            (stage_id,)
+        ).fetchone()
+        gid = grow["id"]
+
+        for seed, pid in enumerate(bucket):
+            conn.execute(
+                "INSERT INTO group_participants (group_id, participant_id, seed) VALUES (?, ?, ?)",
+                (gid, pid, seed)
+            )
+
+        for p1, p2 in combinations(bucket, 2):
+            mrow = conn.execute(
+                "INSERT INTO matches (group_id) VALUES (?) RETURNING id",
+                (gid,)
+            ).fetchone()
+            conn.execute(
+                "INSERT INTO match_participants (match_id, participant_id) VALUES (?, ?)",
+                (mrow["id"], p1)
+            )
+            conn.execute(
+                "INSERT INTO match_participants (match_id, participant_id) VALUES (?, ?)",
+                (mrow["id"], p2)
+            )
+
+    conn.commit()
+
+    # Re-render the stage
+    stages = build_stages_from_db(conn, event_id)
+    stage_index = next(i for i, s in enumerate(stages) if s["id"] == stage_id)
+
+    return templates.TemplateResponse(
+        request, "event_stage.html",
+        {
+            "stage": stages[stage_index],
+            "current_stage_index": stage_index,
+            "total_stages": len(stages),
+            "event_id": event_id,
+            "event_status": "registration",
         }
     )
 

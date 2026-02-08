@@ -907,6 +907,64 @@ body {
 }
 
 /*
+ * Group resize controls
+ */
+.group-resize-bar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    padding: 0.75rem 0;
+}
+
+.group-resize-label {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: #2d2a4a;
+}
+
+.group-resize-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.group-resize-btn {
+    width: 40px;
+    height: 40px;
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #fff;
+    background-color: #2d2a4a;
+    border: 2px solid #2d2a4a;
+    border-radius: 4px;
+    padding: 0;
+    line-height: 1;
+    transition: background-color 0.2s ease;
+}
+
+.group-resize-btn:hover:not([disabled]) {
+    background-color: #e85d4c;
+    border-color: #e85d4c;
+}
+
+.group-resize-btn[disabled] {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+.group-resize-value {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 2.5rem;
+    height: 40px;
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #2d2a4a;
+}
+
+/*
  * Groups stage — collapsible groups with match cards
  */
 .stage-groups {

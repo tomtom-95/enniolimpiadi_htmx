@@ -1,3 +1,5 @@
+<!-- What informations do I need from the db to render this page and for all the api call that can 
+     start from this page? I need -->
 <div class="stage-nav">
     {% if current_stage_index > 0 %}
         <button class="stage-arrow" hx-get="/api/events/{{ event_id }}/stage/{{ current_stage_index - 1 }}"
@@ -8,11 +10,9 @@
     {% else %}
         <button class="stage-arrow" disabled>&#8592;</button>
     {% endif %}
-
     <span class="stage-indicator">
         {{ stage.name }} ({{ current_stage_index + 1 }}/{{ total_stages }})
     </span>
-
     {% if current_stage_index < total_stages - 1 %}
         <button class="stage-arrow" hx-get="/api/events/{{ event_id }}/stage/{{ current_stage_index + 1 }}"
             hx-target="#stage-content" hx-swap="innerHTML"
@@ -23,6 +23,35 @@
         <button class="stage-arrow" disabled>&#8594;</button>
     {% endif %}
 </div>
+
+{% if event_status == "registration" and stage.status == "pending" and stage.kind == "groups" and stage.total_participants >= 2 %}
+    {% set num_groups = stage.groups | length %}
+    <div class="group-resize-bar">
+        <span class="group-resize-label">Numero di gironi:</span>
+        <form class="group-resize-controls" hx-post="/api/events/{{ event_id }}/stages/{{ stage.id }}/resize"
+            hx-target="#stage-content" hx-swap="innerHTML">
+            {% if num_groups > 1 %}
+                <button type="submit" name="num_groups" value="{{ num_groups - 1 }}" class="group-resize-btn">
+                    &minus;
+                </button>
+            {% else %}
+                <button type="submit" name="num_groups" value="{{ num_groups - 1 }}" class="group-resize-btn" disabled>
+                    &minus;
+                </button>
+            {% endif %}
+            <span class="group-resize-value">{{ num_groups }}</span>
+            {% if num_groups < stage.total_participants // 2 %}
+                <button type="submit" name="num_groups" value="{{ num_groups + 1 }}" class="group-resize-btn">
+                    &plus;
+                </button>
+            {% else %}
+                <button type="submit" name="num_groups" value="{{ num_groups + 1 }}" class="group-resize-btn" disabled>
+                    &plus;
+                </button>
+            {% endif %}
+        </form>
+    </div>
+{% endif %}
 
 <div class="stage-body">
     {% if stage.kind == "groups" %}
