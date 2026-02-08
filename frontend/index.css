@@ -829,19 +829,60 @@ body {
 /*
  * Event stages panel (right side)
  */
-.event-stages-panel {
+
+#stage-content {
     flex: 1;
     min-width: 0;
     min-height: 0;
     display: flex;
     flex-direction: column;
+    view-transition-name: stage-slide;
 }
 
-#stage-content {
-    display: flex;
-    flex-direction: column;
-    flex: 1;
-    min-height: 0;
+@keyframes fade-in {
+    from { opacity: 0; }
+}
+
+@keyframes fade-out {
+    to { opacity: 0; }
+}
+
+@keyframes slide-from-right {
+    from { transform: translateX(90px); }
+}
+
+@keyframes slide-to-left {
+    to { transform: translateX(-90px); }
+}
+
+@keyframes slide-from-left {
+    from { transform: translateX(-90px); }
+}
+
+@keyframes slide-to-right {
+    to { transform: translateX(90px); }
+}
+
+/* Forward (default): old exits left, new enters from right */
+::view-transition-old(stage-slide) {
+    animation: 180ms cubic-bezier(0.4, 0, 1, 1) both fade-out,
+               600ms cubic-bezier(0.4, 0, 0.2, 1) both slide-to-left;
+}
+
+::view-transition-new(stage-slide) {
+    animation: 420ms cubic-bezier(0, 0, 0.2, 1) 45ms both fade-in,
+               600ms cubic-bezier(0.4, 0, 0.2, 1) both slide-from-right;
+}
+
+/* Backward: old exits right, new enters from left */
+html.slide-back::view-transition-old(stage-slide) {
+    animation: 180ms cubic-bezier(0.4, 0, 1, 1) both fade-out,
+               600ms cubic-bezier(0.4, 0, 0.2, 1) both slide-to-right;
+}
+
+html.slide-back::view-transition-new(stage-slide) {
+    animation: 420ms cubic-bezier(0, 0, 0.2, 1) 45ms both fade-in,
+               600ms cubic-bezier(0.4, 0, 0.2, 1) both slide-from-left;
 }
 
 .stage-body {
@@ -851,23 +892,6 @@ body {
     overflow-x: clip;
 }
 
-@keyframes slideFromRight {
-    from { transform: translateX(40px); opacity: 0; }
-    to   { transform: translateX(0);    opacity: 1; }
-}
-
-@keyframes slideFromLeft {
-    from { transform: translateX(-40px); opacity: 0; }
-    to   { transform: translateX(0);     opacity: 1; }
-}
-
-#stage-content.slide-left > * {
-    animation: slideFromRight 0.3s ease-out;
-}
-
-#stage-content.slide-right > * {
-    animation: slideFromLeft 0.3s ease-out;
-}
 
 .stage-nav {
     display: flex;

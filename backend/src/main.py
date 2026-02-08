@@ -629,10 +629,48 @@ def _build_bracket_stage(conn, stage_id, stage_label, stage_status):
     return res
 
 
+def _derive_stage_status(stage_order, current_stage_order):
+    """Derive a stage's status from the event's current_stage_order.
+
+    - current_stage_order is None → all stages 'pending' (registration)
+    - stage_order < current_stage_order → 'finished'
+    - stage_order == current_stage_order → 'running'
+    - stage_order > current_stage_order → 'pending'
+    (when current_stage_order > all stage_orders, all are 'finished')
+    """
+    if current_stage_order is None:
+        return "pending"
+    if stage_order < current_stage_order:
+        return "finished"
+    if stage_order == current_stage_order:
+        return "running"
+    return "pending"
+
+
+def _derive_event_status(current_stage_order, max_stage_order):
+    """Derive the event's display status from current_stage_order.
+
+    - NULL → 'registration'
+    - <= max_stage_order → 'started'
+    - > max_stage_order → 'finished'
+    """
+    if current_stage_order is None:
+        return "registration"
+    if max_stage_order is not None and current_stage_order > max_stage_order:
+        return "finished"
+    return "started"
+
+
 def build_stages_from_db(conn, event_id: int):
     """Load all tournament stages for an event from the database."""
+    event_row = conn.execute(
+        "SELECT current_stage_order FROM events WHERE id = ?",
+        (event_id,)
+    ).fetchone()
+    current_stage_order = event_row["current_stage_order"] if event_row else None
+
     stage_rows = conn.execute(
-        "SELECT es.id, es.kind, es.stage_order, es.status, sk.label AS name "
+        "SELECT es.id, es.kind, es.stage_order, sk.label AS name "
         "FROM event_stages es "
         "JOIN stage_kinds sk ON sk.kind = es.kind "
         "WHERE es.event_id = ? ORDER BY es.stage_order",
@@ -641,10 +679,11 @@ def build_stages_from_db(conn, event_id: int):
 
     stages = []
     for sr in stage_rows:
+        derived_status = _derive_stage_status(sr["stage_order"], current_stage_order)
         if sr["kind"] in ("groups", "round_robin"):
-            stages.append(_build_groups_stage(conn, sr["id"], sr["name"], sr["status"]))
+            stages.append(_build_groups_stage(conn, sr["id"], sr["name"], derived_status))
         elif sr["kind"] == "single_elimination":
-            stages.append(_build_bracket_stage(conn, sr["id"], sr["name"], sr["status"]))
+            stages.append(_build_bracket_stage(conn, sr["id"], sr["name"], derived_status))
 
     return stages
 
@@ -698,35 +737,6 @@ async def get_event_players(
     )
 
 
-# I do not really need an api endpoint that retrieves all the stages
-# I just need an endpoint that retrieve one stage
-@app.get("/api/events/{event_id}/stages")
-async def get_event_stages(
-    request: Request,
-    event_id: int,
-    conn = Depends(get_db)
-):
-    event_row = conn.execute(
-        "SELECT status FROM events WHERE id = ?", (event_id,)
-    ).fetchone()
-    event_status = event_row["status"] if event_row else None
-
-    stages = build_stages_from_db(conn, event_id)
-
-    if not stages:
-        return HTMLResponse("<div class='no-stages-msg'>Nessuna fase configurata</div>")
-
-    return templates.TemplateResponse(
-        request, "event_stages_section.html",
-        {
-            "stage": stages[0],
-            "current_stage_index": 0,
-            "total_stages": len(stages),
-            "event_id": event_id,
-            "event_status": event_status,
-        }
-    )
-
 
 @app.get("/api/events/{event_id}/{event_version}")
 async def select_event(
@@ -740,18 +750,25 @@ async def select_event(
     olympiad_id = session_data["selected_olympiad_id"]
 
     event = conn.execute(
-        "SELECT id, name, version, status, score_kind FROM events WHERE id = ? AND olympiad_id = ?",
+        "SELECT id, name, version, current_stage_order, score_kind FROM events WHERE id = ? AND olympiad_id = ?",
         (event_id, olympiad_id)
     ).fetchone()
 
     if not event:
         return HTMLResponse("<div class='error-banner'>Evento non trovato</div>")
 
+    max_stage = conn.execute(
+        "SELECT MAX(stage_order) AS max_order FROM event_stages WHERE event_id = ?",
+        (event_id,)
+    ).fetchone()
+    max_stage_order = max_stage["max_order"] if max_stage else None
+    event_status = _derive_event_status(event["current_stage_order"], max_stage_order)
+
     return templates.TemplateResponse(
         request, "event_page.html",
         {
             "event": {"id": event["id"], "name": event["name"], "version": event["version"],
-                       "status": event["status"], "score_kind": event["score_kind"]},
+                       "status": event_status, "score_kind": event["score_kind"]},
         }
     )
 
@@ -764,9 +781,16 @@ async def get_event_stage(
     conn = Depends(get_db)
 ):
     event_row = conn.execute(
-        "SELECT status FROM events WHERE id = ?", (event_id,)
+        "SELECT current_stage_order FROM events WHERE id = ?", (event_id,)
     ).fetchone()
-    event_status = event_row["status"] if event_row else None
+    current_stage_order = event_row["current_stage_order"] if event_row else None
+
+    max_stage = conn.execute(
+        "SELECT MAX(stage_order) AS max_order FROM event_stages WHERE event_id = ?",
+        (event_id,)
+    ).fetchone()
+    max_stage_order = max_stage["max_order"] if max_stage else None
+    event_status = _derive_event_status(current_stage_order, max_stage_order)
 
     stages = build_stages_from_db(conn, event_id)
 
@@ -794,16 +818,16 @@ async def resize_stage_groups(
     conn = Depends(get_db)
 ):
     event_row = conn.execute(
-        "SELECT status FROM events WHERE id = ?", (event_id,)
+        "SELECT current_stage_order FROM events WHERE id = ?", (event_id,)
     ).fetchone()
-    if not event_row or event_row["status"] != "registration":
+    if not event_row or event_row["current_stage_order"] is not None:
         return HTMLResponse("<div class='error-banner'>Resize consentito solo durante la registrazione</div>")
 
     stage_row = conn.execute(
-        "SELECT id, kind, status FROM event_stages WHERE id = ? AND event_id = ?",
+        "SELECT id, kind FROM event_stages WHERE id = ? AND event_id = ?",
         (stage_id, event_id)
     ).fetchone()
-    if not stage_row or stage_row["kind"] not in ("groups", "round_robin") or stage_row["status"] != "pending":
+    if not stage_row or stage_row["kind"] not in ("groups", "round_robin"):
         return HTMLResponse("<div class='error-banner'>Fase non trovata o già iniziata</div>")
 
     participant_rows = conn.execute(

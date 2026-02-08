@@ -1,116 +1,117 @@
-<!-- What informations do I need from the db to render this page and for all the api call that can 
-     start from this page? I need -->
-<div class="stage-nav">
-    {% if current_stage_index > 0 %}
-        <button class="stage-arrow" hx-get="/api/events/{{ event_id }}/stage/{{ current_stage_index - 1 }}"
-            hx-target="#stage-content" hx-swap="innerHTML"
-            _="on click remove .slide-left from #stage-content then add .slide-right to #stage-content">
-            &#8592;
-        </button>
-    {% else %}
-        <button class="stage-arrow" disabled>&#8592;</button>
-    {% endif %}
-    <span class="stage-indicator">
-        {{ stage.name }} ({{ current_stage_index + 1 }}/{{ total_stages }})
-    </span>
-    {% if current_stage_index < total_stages - 1 %}
-        <button class="stage-arrow" hx-get="/api/events/{{ event_id }}/stage/{{ current_stage_index + 1 }}"
-            hx-target="#stage-content" hx-swap="innerHTML"
-            _="on click remove .slide-right from #stage-content then add .slide-left to #stage-content">
-            &#8594;
-        </button>
-    {% else %}
-        <button class="stage-arrow" disabled>&#8594;</button>
-    {% endif %}
-</div>
-
-{% if event_status == "registration" and stage.status == "pending" and stage.kind == "groups" and stage.total_participants >= 2 %}
-    {% set num_groups = stage.groups | length %}
-    <div class="group-resize-bar">
-        <span class="group-resize-label">Numero di gironi:</span>
-        <form class="group-resize-controls" hx-post="/api/events/{{ event_id }}/stages/{{ stage.id }}/resize"
-            hx-target="#stage-content" hx-swap="innerHTML">
-            {% if num_groups > 1 %}
-                <button type="submit" name="num_groups" value="{{ num_groups - 1 }}" class="group-resize-btn">
-                    &minus;
-                </button>
-            {% else %}
-                <button type="submit" name="num_groups" value="{{ num_groups - 1 }}" class="group-resize-btn" disabled>
-                    &minus;
-                </button>
-            {% endif %}
-            <span class="group-resize-value">{{ num_groups }}</span>
-            {% if num_groups < stage.total_participants // 2 %}
-                <button type="submit" name="num_groups" value="{{ num_groups + 1 }}" class="group-resize-btn">
-                    &plus;
-                </button>
-            {% else %}
-                <button type="submit" name="num_groups" value="{{ num_groups + 1 }}" class="group-resize-btn" disabled>
-                    &plus;
-                </button>
-            {% endif %}
-        </form>
+<div class="event-stages-panel" id="stage-content">
+    <div class="stage-nav">
+        {% if current_stage_index > 0 %}
+            <button class="stage-arrow" hx-get="/api/events/{{ event_id }}/stage/{{ current_stage_index - 1 }}"
+                hx-target="#stage-content" hx-swap="outerHTML transition:true"
+                _="on click add .slide-back to <html/>">
+                &#8592;
+            </button>
+        {% else %}
+            <button class="stage-arrow" disabled>&#8592;</button>
+        {% endif %}
+        <span class="stage-indicator">
+            {{ stage.name }} ({{ current_stage_index + 1 }}/{{ total_stages }})
+        </span>
+        {% if current_stage_index < total_stages - 1 %}
+            <button class="stage-arrow" hx-get="/api/events/{{ event_id }}/stage/{{ current_stage_index + 1 }}"
+                hx-target="#stage-content" hx-swap="outerHTML transition:true"
+                _="on click remove .slide-back from <html/>">
+                &#8594;
+            </button>
+        {% else %}
+            <button class="stage-arrow" disabled>&#8594;</button>
+        {% endif %}
     </div>
-{% endif %}
 
-<div class="stage-body">
-    {% if stage.kind == "groups" %}
-        <div class="stage-groups">
-            {% for group in stage.groups %}
-                <div class="group-card">
-                    <div class="group-header" _="on click toggle .collapsed on closest .group-card">
-                        <h4>{{ group.name }}</h4>
-                        <span class="group-toggle">&#9662;</span>
-                    </div>
-                    {% set ps = group.participants %}
-                    {% set n = ps | length %}
-                    <div class="group-grid-wrap">
-                        <div class="grid-row-labels">
-                            <div class="grid-col-header-spacer"></div>
-                            {% for i in range(0, n) %}
-                                <div class="grid-row-header">{{ ps[i] }}</div>
-                            {% endfor %}
+    {% if event_status == "registration" and stage.status == "pending" and stage.kind == "groups" and stage.total_participants >= 2 %}
+        {% set num_groups = stage.groups | length %}
+        <div class="group-resize-bar">
+            <span class="group-resize-label">Numero di gironi:</span>
+            <form class="group-resize-controls" hx-post="/api/events/{{ event_id }}/stages/{{ stage.id }}/resize"
+                hx-target="#stage-content" hx-swap="outerHTML">
+                {% if num_groups > 1 %}
+                    <button type="submit" name="num_groups" value="{{ num_groups - 1 }}" class="group-resize-btn">
+                        &minus;
+                    </button>
+                {% else %}
+                    <button type="submit" name="num_groups" value="{{ num_groups - 1 }}" class="group-resize-btn" disabled>
+                        &minus;
+                    </button>
+                {% endif %}
+                <span class="group-resize-value">{{ num_groups }}</span>
+                {% if num_groups < stage.total_participants // 2 %}
+                    <button type="submit" name="num_groups" value="{{ num_groups + 1 }}" class="group-resize-btn">
+                        &plus;
+                    </button>
+                {% else %}
+                    <button type="submit" name="num_groups" value="{{ num_groups + 1 }}" class="group-resize-btn" disabled>
+                        &plus;
+                    </button>
+                {% endif %}
+            </form>
+        </div>
+    {% endif %}
+
+    <div class="stage-body">
+        {% if stage.kind == "groups" %}
+            <div class="stage-groups">
+                {% for group in stage.groups %}
+                    <div class="group-card">
+                        <div class="group-header" _="on click toggle .collapsed on closest .group-card">
+                            <h4>{{ group.name }}</h4>
+                            <span class="group-toggle">&#9662;</span>
                         </div>
-                        <div class="grid-scroll">
-                            <div class="grid-scores" style="grid-template-columns: repeat({{ n }}, 1fr);">
-                                {% for j in range(0, n) %}
-                                    <div class="grid-col-header">{{ ps[j] }}</div>
-                                {% endfor %}
-
+                        {% set ps = group.participants %}
+                        {% set n = ps | length %}
+                        <div class="group-grid-wrap">
+                            <div class="grid-row-labels">
+                                <div class="grid-col-header-spacer"></div>
                                 {% for i in range(0, n) %}
-                                    {% for j in range(0, n) %}
-                                        {% if i == j %}
-                                            <div class="grid-cell self">&#10005;</div>
-                                        {% elif j > i %}
-                                            {% set score = group.scores.get(ps[i], {}).get(ps[j]) %}
-                                            <div class="grid-cell {% if score %}has-score{% endif %}">
-                                                {{ score if score else "–" }}
-                                            </div>
-                                        {% else %}
-                                            <div class="grid-cell empty"></div>
-                                        {% endif %}
-                                    {% endfor %}
+                                    <div class="grid-row-header">{{ ps[i] }}</div>
                                 {% endfor %}
+                            </div>
+                            <div class="grid-scroll">
+                                <div class="grid-scores" style="grid-template-columns: repeat({{ n }}, 1fr);">
+                                    {% for j in range(0, n) %}
+                                        <div class="grid-col-header">{{ ps[j] }}</div>
+                                    {% endfor %}
+                                    {% for i in range(0, n) %}
+                                        {% for j in range(0, n) %}
+                                            {% if i == j %}
+                                                <div class="grid-cell self">&#10005;</div>
+                                            {% elif j > i %}
+                                                {% set score = group.scores.get(ps[i], {}).get(ps[j]) %}
+                                                    {% if score %}
+                                                        <div class="grid-cell has-score">{{ score }}</div>
+                                                    {% else %}
+                                                        <div class="grid-cell">-</div>
+                                                    {% endif %}
+                                            {% else %}
+                                                <div class="grid-cell empty"></div>
+                                            {% endif %}
+                                        {% endfor %}
+                                    {% endfor %}
+                                </div>
                             </div>
                         </div>
                     </div>
-                </div>
-            {% endfor %}
-        </div>
-    {% elif stage.kind == "single_elimination" %}
-        <div class="stage-bracket">
-            {% for round in stage.rounds %}
-                <div class="bracket-round">
-                    <h4>{{ round.name }}</h4>
-                    {% for match in round.matches %}
-                        <div class="bracket-match">
-                            <div class="bracket-participant bracket-top">{{ match.p1 }}</div>
-                            <div class="bracket-score">{{ match.score }}</div>
-                            <div class="bracket-participant bracket-bottom">{{ match.p2 }}</div>
-                        </div>
-                    {% endfor %}
-                </div>
-            {% endfor %}
-        </div>
-    {% endif %}
+                {% endfor %}
+            </div>
+        {% elif stage.kind == "single_elimination" %}
+            <div class="stage-bracket">
+                {% for round in stage.rounds %}
+                    <div class="bracket-round">
+                        <h4>{{ round.name }}</h4>
+                        {% for match in round.matches %}
+                            <div class="bracket-match">
+                                <div class="bracket-participant bracket-top">{{ match.p1 }}</div>
+                                <div class="bracket-score">{{ match.score }}</div>
+                                <div class="bracket-participant bracket-bottom">{{ match.p2 }}</div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    </div>
 </div>

@@ -14,7 +14,7 @@ CREATE TABLE events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     olympiad_id INTEGER NOT NULL REFERENCES olympiads(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'registration' CHECK(status IN ('registration', 'started', 'finished')),
+    current_stage_order INTEGER, -- NULL=registration, 1..N=started, >max=finished
     score_kind TEXT NOT NULL CHECK(score_kind IN ('points', 'outcome')),
     version INTEGER NOT NULL DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -77,7 +77,6 @@ CREATE TABLE event_stages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
     kind TEXT NOT NULL REFERENCES stage_kinds(kind) CHECK(kind IN ('groups', 'round_robin', 'single_elimination')),
-    status TEXT NOT NULL CHECK(status IN ('pending', 'running', 'finished')),
     stage_order INTEGER NOT NULL,
     advance_count INTEGER, -- null for final stage
     version INTEGER NOT NULL DEFAULT 1,

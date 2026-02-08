@@ -3,25 +3,17 @@
     <div class="event-status-badge {{ event.status }}">{{ event.status }}</div>
 
     <div class="event-tabs">
-        <button id="tab-players" class="event-tab active"
-            hx-get="/api/events/{{ event.id }}/players"
-            hx-target="#event-section-content"
-            hx-swap="innerHTML"
+        <button id="tab-players" class="event-tab active" hx-get="/api/events/{{ event.id }}/players"
+            hx-trigger="load, click" hx-target="#event-section-content" hx-swap="innerHTML"
             _="on click add .active to me then remove .active from #tab-stages">
             Giocatori
         </button>
-        <button id="tab-stages" class="event-tab"
-            hx-get="/api/events/{{ event.id }}/stages"
-            hx-target="#event-section-content"
-            hx-swap="innerHTML"
+        <button id="tab-stages" class="event-tab" hx-get="/api/events/{{ event.id }}/stage/0"
+            hx-target="#event-section-content" hx-swap="innerHTML"
             _="on click add .active to me then remove .active from #tab-players">
             Fasi
         </button>
     </div>
 
-    <div id="event-section-content" class="event-layout"
-         hx-get="/api/events/{{ event.id }}/players"
-         hx-trigger="load"
-         hx-swap="innerHTML">
-    </div>
+    <div id="event-section-content" class="event-layout"></div>
 </div>

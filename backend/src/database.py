@@ -78,33 +78,33 @@ def seed_dummy_data(db_path: Path):
         conn.executemany("INSERT INTO players (olympiad_id, name) VALUES (?, ?)", players)
 
         events = [
-            (olympiad_id, "Event1" , "registration", "points"),
-            (olympiad_id, "Event2" , "registration", "points"),
-            (olympiad_id, "Event3" , "registration", "points"),
-            (olympiad_id, "Event4" , "registration", "points"),
-            (olympiad_id, "Event5" , "registration", "points"),
-            (olympiad_id, "Event6" , "registration", "points"),
-            (olympiad_id, "Event7" , "registration", "points"),
-            (olympiad_id, "Event8" , "registration", "points"),
-            (olympiad_id, "Event9" , "registration", "points"),
-            (olympiad_id, "Event10", "registration", "points"),
-            (olympiad_id, "Event11", "registration", "points"),
-            (olympiad_id, "Event12", "registration", "points"),
-            (olympiad_id, "Event13", "registration", "points"),
-            (olympiad_id, "Event14", "registration", "points"),
-            (olympiad_id, "Event15", "registration", "points"),
-            (olympiad_id, "Event16", "registration", "points")
+            (olympiad_id, "Event1" , "points"),
+            (olympiad_id, "Event2" , "points"),
+            (olympiad_id, "Event3" , "points"),
+            (olympiad_id, "Event4" , "points"),
+            (olympiad_id, "Event5" , "points"),
+            (olympiad_id, "Event6" , "points"),
+            (olympiad_id, "Event7" , "points"),
+            (olympiad_id, "Event8" , "points"),
+            (olympiad_id, "Event9" , "points"),
+            (olympiad_id, "Event10", "points"),
+            (olympiad_id, "Event11", "points"),
+            (olympiad_id, "Event12", "points"),
+            (olympiad_id, "Event13", "points"),
+            (olympiad_id, "Event14", "points"),
+            (olympiad_id, "Event15", "points"),
+            (olympiad_id, "Event16", "points")
         ]
-        conn.executemany("INSERT INTO events (olympiad_id, name, status, score_kind) VALUES (?, ?, ?, ?)", events)
+        conn.executemany("INSERT INTO events (olympiad_id, name, score_kind) VALUES (?, ?, ?)", events)
 
         # Create event stages
         conn.execute(
-            "INSERT INTO event_stages (event_id, kind, status, stage_order) VALUES (?, ?, ?, ?)",
-            (1, "groups", "pending", 1)
+            "INSERT INTO event_stages (event_id, kind, stage_order) VALUES (?, ?, ?)",
+            (1, "groups", 1)
         )
         conn.execute(
-            "INSERT INTO event_stages (event_id, kind, status, stage_order) VALUES (?, ?, ?, ?)",
-            (1, "single_elimination", "pending", 2)
+            "INSERT INTO event_stages (event_id, kind, stage_order) VALUES (?, ?, ?)",
+            (1, "single_elimination", 2)
         )
 
         # Create first group of event_stage_id 1
