@@ -69,9 +69,9 @@ CREATE TABLE stage_kinds (
 
 -- Insert reference data for stage kinds
 INSERT INTO stage_kinds (kind, label) VALUES
-    ('groups', 'Groups'),
-    ('round_robin', 'Round Robin'),
-    ('single_elimination', 'Single Elimination');
+    ('groups', 'Fase a Gironi'),
+    ('round_robin', 'Girone Unico'),
+    ('single_elimination', 'Eliminazione Diretta');
 
 CREATE TABLE event_stages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -1,4 +1,5 @@
 import sqlite3
+from itertools import combinations
 from pathlib import Path
 
 def get_connection(db_path: Path) -> sqlite3.Connection:
@@ -52,31 +53,119 @@ def seed_dummy_data(db_path: Path):
             ("OlympiadY", "5678"),
             ("OlympiadZ", "5678"),
         ]
-        conn.executemany(
-            "INSERT INTO olympiads (name, pin) VALUES (?, ?)",
-            olympiads
+        conn.executemany("INSERT INTO olympiads (name, pin) VALUES (?, ?)", olympiads)
+
+        olympiad_id = 1
+
+        players = [
+            (olympiad_id, "Player1"),
+            (olympiad_id, "Player2"),
+            (olympiad_id, "Player3"),
+            (olympiad_id, "Player4"),
+            (olympiad_id, "Player5"),
+            (olympiad_id, "Player6"),
+            (olympiad_id, "Player7"),
+            (olympiad_id, "Player8"),
+            (olympiad_id, "Player9"),
+            (olympiad_id, "Player10"),
+            (olympiad_id, "Player11"),
+            (olympiad_id, "Player12"),
+            (olympiad_id, "Player13"),
+            (olympiad_id, "Player14"),
+            (olympiad_id, "Player15"),
+            (olympiad_id, "Player16")
+        ]
+        conn.executemany("INSERT INTO players (olympiad_id, name) VALUES (?, ?)", players)
+
+        events = [
+            (olympiad_id, "Event1" , "registration", "points"),
+            (olympiad_id, "Event2" , "registration", "points"),
+            (olympiad_id, "Event3" , "registration", "points"),
+            (olympiad_id, "Event4" , "registration", "points"),
+            (olympiad_id, "Event5" , "registration", "points"),
+            (olympiad_id, "Event6" , "registration", "points"),
+            (olympiad_id, "Event7" , "registration", "points"),
+            (olympiad_id, "Event8" , "registration", "points"),
+            (olympiad_id, "Event9" , "registration", "points"),
+            (olympiad_id, "Event10", "registration", "points"),
+            (olympiad_id, "Event11", "registration", "points"),
+            (olympiad_id, "Event12", "registration", "points"),
+            (olympiad_id, "Event13", "registration", "points"),
+            (olympiad_id, "Event14", "registration", "points"),
+            (olympiad_id, "Event15", "registration", "points"),
+            (olympiad_id, "Event16", "registration", "points")
+        ]
+        conn.executemany("INSERT INTO events (olympiad_id, name, status, score_kind) VALUES (?, ?, ?, ?)", events)
+
+        # Create event stages
+        conn.execute(
+            "INSERT INTO event_stages (event_id, kind, status, stage_order) VALUES (?, ?, ?, ?)",
+            (1, "groups", "pending", 1)
+        )
+        conn.execute(
+            "INSERT INTO event_stages (event_id, kind, status, stage_order) VALUES (?, ?, ?, ?)",
+            (1, "single_elimination", "pending", 2)
         )
 
-        # Insert dummy players (5 per olympiad)
-        players = []
-        for olympiad_id in range(1, 6):
-            for player_name in ["PlayerA", "PlayerB", "PlayerC", "PlayerD", "PlayerE"]:
-                players.append((olympiad_id, f"{player_name}_{olympiad_id}"))
-        conn.executemany(
-            "INSERT INTO players (olympiad_id, name) VALUES (?, ?)",
-            players
-        )
+        # Create first group of event_stage_id 1
+        conn.execute("INSERT INTO groups (event_stage_id) VALUES (?)", (1,))
 
-        # Insert dummy events (5 per olympiad)
-        events = []
-        for olympiad_id in range(1, 6):
-            for i, event_name in enumerate(["EventA", "EventB", "EventC", "EventD", "EventE"]):
-                score_kind = "points" if i % 2 == 0 else "outcome"
-                events.append((olympiad_id, f"{event_name}_{olympiad_id}", score_kind))
-        conn.executemany(
-            "INSERT INTO events (olympiad_id, name, score_kind) VALUES (?, ?, ?)",
-            events
-        )
+        # Create second group of event_stage_id 1
+        conn.execute("INSERT INTO groups (event_stage_id) VALUES (?)", (1,))
+
+        # Create first and only group of event_stage_id 2
+        conn.execute("INSERT INTO groups (event_stage_id) VALUES (?)", (2,))
+
+        # Now I must create participants with team_id = NULL (they are just player)
+        participants = [
+            1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16
+        ]
+        for participant in participants:
+            conn.execute("INSERT INTO participants (player_id, team_id) VALUES (?, ?)", (participant, None))
+
+        # Insert the participants into group_participants table
+        for i in range(1, 9):
+            conn.execute("INSERT INTO group_participants (group_id, participant_id) VALUES (?, ?)", (1, i))
+        for i in range(9, 17):
+            conn.execute("INSERT INTO group_participants (group_id, participant_id) VALUES (?, ?)", (2, i))
+
+        # Insert matches
+        for i in range(28):
+            conn.execute("INSERT INTO matches (group_id) VALUES (?)", (1,))
+        for i in range(28):
+            conn.execute("INSERT INTO matches (group_id) VALUES (?)", (2,))
+
+        # Insert match_participants (round-robin pairings)
+        group1_participants = list(range(1, 9))
+        group1_pairings = list(combinations(group1_participants, 2))
+        for match_idx, (p1, p2) in enumerate(group1_pairings):
+            match_id = match_idx + 1
+            conn.execute("INSERT INTO match_participants (match_id, participant_id) VALUES (?, ?)", (match_id, p1))
+            conn.execute("INSERT INTO match_participants (match_id, participant_id) VALUES (?, ?)", (match_id, p2))
+
+        group2_participants = list(range(9, 17))
+        group2_pairings = list(combinations(group2_participants, 2))
+        for match_idx, (p1, p2) in enumerate(group2_pairings):
+            match_id = match_idx + 29
+            conn.execute("INSERT INTO match_participants (match_id, participant_id) VALUES (?, ?)", (match_id, p1))
+            conn.execute("INSERT INTO match_participants (match_id, participant_id) VALUES (?, ?)", (match_id, p2))
+
+        # Insert match_participant_scores (dummy scores)
+        scores = [
+            (3, 1), (2, 0), (1, 3), (0, 2), (3, 2), (2, 1), (1, 0),
+            (2, 3), (0, 1), (3, 0), (1, 2), (2, 2), (3, 1), (0, 3),
+            (1, 1), (2, 0), (3, 2), (0, 1), (2, 3), (1, 0), (3, 1),
+            (0, 2), (2, 1), (1, 3), (3, 0), (2, 2), (0, 1), (1, 2),
+        ]
+        for match_idx, ((p1, p2), (s1, s2)) in enumerate(zip(group1_pairings, scores)):
+            match_id = match_idx + 1
+            conn.execute("INSERT INTO match_participant_scores (match_id, participant_id, score) VALUES (?, ?, ?)", (match_id, p1, s1))
+            conn.execute("INSERT INTO match_participant_scores (match_id, participant_id, score) VALUES (?, ?, ?)", (match_id, p2, s2))
+
+        for match_idx, ((p1, p2), (s1, s2)) in enumerate(zip(group2_pairings, scores)):
+            match_id = match_idx + 29
+            conn.execute("INSERT INTO match_participant_scores (match_id, participant_id, score) VALUES (?, ?, ?)", (match_id, p1, s1))
+            conn.execute("INSERT INTO match_participant_scores (match_id, participant_id, score) VALUES (?, ?, ?)", (match_id, p2, s2))
 
         conn.commit()
     finally:

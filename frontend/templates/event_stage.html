@@ -1,103 +1,87 @@
 <div class="stage-nav">
-    <button class="stage-arrow"
-        {% if current_stage_index > 0 %}
-        hx-get="/api/events/{{ event_id }}/stage/{{ current_stage_index - 1 }}"
-        hx-target="#stage-content"
-        hx-swap="innerHTML"
-        {% else %}
-        disabled
-        {% endif %}>
-        &#8592;
-    </button>
+    {% if current_stage_index > 0 %}
+        <button class="stage-arrow" hx-get="/api/events/{{ event_id }}/stage/{{ current_stage_index - 1 }}"
+            hx-target="#stage-content" hx-swap="innerHTML"
+            _="on click remove .slide-left from #stage-content then add .slide-right to #stage-content">
+            &#8592;
+        </button>
+    {% else %}
+        <button class="stage-arrow" disabled>&#8592;</button>
+    {% endif %}
+
     <span class="stage-indicator">
         {{ stage.name }} ({{ current_stage_index + 1 }}/{{ total_stages }})
     </span>
-    <button class="stage-arrow"
-        {% if current_stage_index < total_stages - 1 %}
-        hx-get="/api/events/{{ event_id }}/stage/{{ current_stage_index + 1 }}"
-        hx-target="#stage-content"
-        hx-swap="innerHTML"
-        {% else %}
-        disabled
-        {% endif %}>
-        &#8594;
-    </button>
+
+    {% if current_stage_index < total_stages - 1 %}
+        <button class="stage-arrow" hx-get="/api/events/{{ event_id }}/stage/{{ current_stage_index + 1 }}"
+            hx-target="#stage-content" hx-swap="innerHTML"
+            _="on click remove .slide-right from #stage-content then add .slide-left to #stage-content">
+            &#8594;
+        </button>
+    {% else %}
+        <button class="stage-arrow" disabled>&#8594;</button>
+    {% endif %}
 </div>
 
-{% if stage.kind == "groups" %}
-<div class="stage-groups">
-    {% for group in stage.groups %}
-    <div class="group-card">
-        <div class="group-header"
-             _="on click toggle .collapsed on closest .group-card">
-            <h4>{{ group.name }}</h4>
-            <span class="group-toggle">&#9662;</span>
-        </div>
+<div class="stage-body">
+    {% if stage.kind == "groups" %}
+        <div class="stage-groups">
+            {% for group in stage.groups %}
+                <div class="group-card">
+                    <div class="group-header" _="on click toggle .collapsed on closest .group-card">
+                        <h4>{{ group.name }}</h4>
+                        <span class="group-toggle">&#9662;</span>
+                    </div>
+                    {% set ps = group.participants %}
+                    {% set n = ps | length %}
+                    <div class="group-grid-wrap">
+                        <div class="grid-row-labels">
+                            <div class="grid-col-header-spacer"></div>
+                            {% for i in range(0, n) %}
+                                <div class="grid-row-header">{{ ps[i] }}</div>
+                            {% endfor %}
+                        </div>
+                        <div class="grid-scroll">
+                            <div class="grid-scores" style="grid-template-columns: repeat({{ n }}, 1fr);">
+                                {% for j in range(0, n) %}
+                                    <div class="grid-col-header">{{ ps[j] }}</div>
+                                {% endfor %}
 
-        {% if group.layout == "cards" %}
-        <div class="group-matches">
-            {% for match in group.matches %}
-            <div class="match-card {% if match.score %}has-score{% endif %}">
-                <span class="match-card-p">{{ match.p1 }}</span>
-                <span class="match-card-score">{{ match.score if match.score else "–" }}</span>
-                <span class="match-card-p">{{ match.p2 }}</span>
-            </div>
+                                {% for i in range(0, n) %}
+                                    {% for j in range(0, n) %}
+                                        {% if i == j %}
+                                            <div class="grid-cell self">&#10005;</div>
+                                        {% elif j > i %}
+                                            {% set score = group.scores.get(ps[i], {}).get(ps[j]) %}
+                                            <div class="grid-cell {% if score %}has-score{% endif %}">
+                                                {{ score if score else "–" }}
+                                            </div>
+                                        {% else %}
+                                            <div class="grid-cell empty"></div>
+                                        {% endif %}
+                                    {% endfor %}
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
             {% endfor %}
         </div>
-
-        {% elif group.layout == "grid" %}
-        {% set ps = group.participants %}
-        {% set n = ps | length %}
-        <div class="group-grid-wrap">
-            <div class="grid-row-labels">
-                <div class="grid-col-header-spacer"></div>
-                {% for i in range(0, n) %}
-                <div class="grid-row-header">{{ ps[i] }}</div>
-                {% endfor %}
-            </div>
-            <div class="grid-scroll">
-                <div class="grid-scores"
-                     style="grid-template-columns: repeat({{ n }}, 1fr);">
-                    {% for j in range(0, n) %}
-                    <div class="grid-col-header">{{ ps[j] }}</div>
-                    {% endfor %}
-
-                    {% for i in range(0, n) %}
-                    {% for j in range(0, n) %}
-                        {% if i == j %}
-                            <div class="grid-cell self">&#10005;</div>
-                        {% elif j > i %}
-                            {% set score = group.scores.get(ps[i], {}).get(ps[j]) %}
-                            <div class="grid-cell {% if score %}has-score{% endif %}">
-                                {{ score if score else "–" }}
-                            </div>
-                        {% else %}
-                            <div class="grid-cell empty"></div>
-                        {% endif %}
-                    {% endfor %}
+    {% elif stage.kind == "single_elimination" %}
+        <div class="stage-bracket">
+            {% for round in stage.rounds %}
+                <div class="bracket-round">
+                    <h4>{{ round.name }}</h4>
+                    {% for match in round.matches %}
+                        <div class="bracket-match">
+                            <div class="bracket-participant bracket-top">{{ match.p1 }}</div>
+                            <div class="bracket-score">{{ match.score }}</div>
+                            <div class="bracket-participant bracket-bottom">{{ match.p2 }}</div>
+                        </div>
                     {% endfor %}
                 </div>
-            </div>
+            {% endfor %}
         </div>
-        {% endif %}
-
-    </div>
-    {% endfor %}
+    {% endif %}
 </div>
-
-{% elif stage.kind == "single_elimination" %}
-<div class="stage-bracket">
-    {% for round in stage.rounds %}
-    <div class="bracket-round">
-        <h4>{{ round.name }}</h4>
-        {% for match in round.matches %}
-        <div class="bracket-match">
-            <div class="bracket-participant bracket-top">{{ match.p1 }}</div>
-            <div class="bracket-score">{{ match.score }}</div>
-            <div class="bracket-participant bracket-bottom">{{ match.p2 }}</div>
-        </div>
-        {% endfor %}
-    </div>
-    {% endfor %}
-</div>
-{% endif %}

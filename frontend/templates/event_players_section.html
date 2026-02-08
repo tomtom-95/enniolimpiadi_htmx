@@ -1,0 +1,25 @@
+<button class="btn-add-player" _="on click toggle .hidden on #available-players-dropdown">
+    + Aggiungi Giocatore
+</button>
+<div id="available-players-dropdown" class="hidden">
+    {% include 'event_available_players.html' %}
+</div>
+<div id="enrolled-players-list">
+    {% if not enrolled_players %}
+        <p class="no-players-msg">Nessun giocatore iscritto</p>
+    {% else %}
+        {% for player in enrolled_players %}
+            <div id="enrolled-player-{{ player.id }}" class="entity-element">
+                <div class="item">{{ player.name }}</div>
+                <div class="item-icons">
+                    <button class="item-delete" aria-label="Rimuovi"
+                        hx-delete="/api/events/{{ event_id }}/players/{{ player.id }}"
+                        hx-target="#enrolled-player-{{ player.id }}"
+                        hx-trigger="click"
+                        hx-swap="outerHTML">
+                    </button>
+                </div>
+            </div>
+        {% endfor %}
+    {% endif %}
+</div>

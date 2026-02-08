@@ -456,67 +456,260 @@ async def select_olympiad(
         {"olympiad": {"id": olympiad["id"], "name": olympiad["name"], "version": olympiad["version"]}}
     )
 
-def _build_mock_stages(player_names):
-    """Build hardcoded mock tournament stages for the event page prototype."""
-    names = player_names + [f"Giocatore {i}" for i in range(len(player_names) + 1, 17)]
-    p = names[:16]
+_ROUND_NAMES = {1: "Finale", 2: "Semifinale", 4: "Quarti di Finale", 8: "Ottavi di Finale"}
 
-    def make_round_robin(players):
-        matches = []
-        mock_scores = ["2 - 1", "3 - 0", "1 - 1", "0 - 2", "0 - 1", "2 - 2", "1 - 3", None]
-        idx = 0
-        for i in range(len(players)):
-            for j in range(i + 1, len(players)):
-                matches.append({"p1": players[i], "p2": players[j], "score": mock_scores[idx % len(mock_scores)]})
-                idx += 1
-        return matches
 
-    def matches_to_scores(matches):
+def _build_groups_stage(conn, stage_id, stage_label):
+    """Build a groups/round-robin stage dict from DB data."""
+    group_rows = conn.execute(
+        "SELECT id FROM groups WHERE event_stage_id = ? ORDER BY id",
+        (stage_id,)
+    ).fetchall()
+
+    groups = []
+    for idx, grow in enumerate(group_rows):
+        gid = grow["id"]
+
+        # Participant names in seed order
+        part_rows = conn.execute(
+            "SELECT gp.participant_id, COALESCE(pl.name, t.name) AS display_name "
+            "FROM group_participants gp "
+            "JOIN participants p ON p.id = gp.participant_id "
+            "LEFT JOIN players pl ON pl.id = p.player_id "
+            "LEFT JOIN teams t ON t.id = p.team_id "
+            "WHERE gp.group_id = ? ORDER BY gp.seed",
+            (gid,)
+        ).fetchall()
+
+        participants = [r["display_name"] for r in part_rows]
+        pid_to_name = {r["participant_id"]: r["display_name"] for r in part_rows}
+
+        # Match scores (exclude bracket matches)
+        match_rows = conn.execute(
+            "SELECT m.id, "
+            "  mp1.participant_id AS p1_id, mp2.participant_id AS p2_id, "
+            "  mps1.score AS p1_score, mps2.score AS p2_score "
+            "FROM matches m "
+            "JOIN match_participants mp1 ON mp1.match_id = m.id "
+            "JOIN match_participants mp2 ON mp2.match_id = m.id "
+            "  AND mp2.participant_id > mp1.participant_id "
+            "LEFT JOIN match_participant_scores mps1 "
+            "  ON mps1.match_id = m.id AND mps1.participant_id = mp1.participant_id "
+            "LEFT JOIN match_participant_scores mps2 "
+            "  ON mps2.match_id = m.id AND mps2.participant_id = mp2.participant_id "
+            "WHERE m.group_id = ? "
+            "  AND NOT EXISTS (SELECT 1 FROM bracket_matches bm WHERE bm.match_id = m.id)",
+            (gid,)
+        ).fetchall()
+
         scores = {}
-        for m in matches:
-            scores.setdefault(m["p1"], {})[m["p2"]] = m["score"]
-        return scores
+        for mr in match_rows:
+            p1_name = pid_to_name.get(mr["p1_id"])
+            p2_name = pid_to_name.get(mr["p2_id"])
+            if p1_name and p2_name:
+                score_str = (
+                    f"{mr['p1_score']} - {mr['p2_score']}"
+                    if mr["p1_score"] is not None and mr["p2_score"] is not None
+                    else None
+                )
+                scores.setdefault(p1_name, {})[p2_name] = score_str
 
-    matches_b = make_round_robin(p[8:])
+        groups.append({
+            "name": f"Girone {chr(65 + idx)}",
+            "participants": participants,
+            "scores": scores,
+        })
 
-    return [
+    return {"name": stage_label, "kind": "groups", "groups": groups}
+
+
+def _build_bracket_stage(conn, stage_id, stage_label):
+    """Build a single-elimination stage dict from DB data."""
+    from collections import defaultdict, deque
+
+    # Load all bracket matches for this stage
+    rows = conn.execute(
+        "SELECT m.id AS match_id, bm.next_match_id "
+        "FROM groups g "
+        "JOIN matches m ON m.group_id = g.id "
+        "JOIN bracket_matches bm ON bm.match_id = m.id "
+        "WHERE g.event_stage_id = ?",
+        (stage_id,)
+    ).fetchall()
+
+    if not rows:
+        return {"name": stage_label, "kind": "single_elimination", "rounds": []}
+
+    # Load participants for all these matches
+    match_ids = [r["match_id"] for r in rows]
+    placeholders = ",".join("?" * len(match_ids))
+    mp_rows = conn.execute(
+        f"SELECT mp.match_id, mp.participant_id, "
+        f"  COALESCE(pl.name, t.name) AS display_name "
+        f"FROM match_participants mp "
+        f"JOIN participants p ON p.id = mp.participant_id "
+        f"LEFT JOIN players pl ON pl.id = p.player_id "
+        f"LEFT JOIN teams t ON t.id = p.team_id "
+        f"WHERE mp.match_id IN ({placeholders})",
+        match_ids
+    ).fetchall()
+
+    # match_id -> list of (participant_id, name)
+    match_parts = defaultdict(list)
+    for r in mp_rows:
+        match_parts[r["match_id"]].append((r["participant_id"], r["display_name"]))
+
+    # Load scores
+    score_rows = conn.execute(
+        f"SELECT match_id, participant_id, score "
+        f"FROM match_participant_scores "
+        f"WHERE match_id IN ({placeholders})",
+        match_ids
+    ).fetchall()
+    score_map = {}
+    for r in score_rows:
+        score_map[(r["match_id"], r["participant_id"])] = r["score"]
+
+    # Build bracket tree
+    feeders = defaultdict(list)
+    matches_by_id = {}
+    for r in rows:
+        matches_by_id[r["match_id"]] = r
+        if r["next_match_id"] is not None:
+            feeders[r["next_match_id"]].append(r["match_id"])
+
+    # Find the final (next_match_id IS NULL)
+    final_id = None
+    for mid, r in matches_by_id.items():
+        if r["next_match_id"] is None:
+            final_id = mid
+            break
+
+    # BFS to assign round depths (0 = final)
+    round_assignment = {}
+    queue = deque([(final_id, 0)])
+    while queue:
+        mid, depth = queue.popleft()
+        round_assignment[mid] = depth
+        for feeder_id in feeders.get(mid, []):
+            queue.append((feeder_id, depth + 1))
+
+    # Group by round, earliest rounds first
+    max_round = max(round_assignment.values()) if round_assignment else 0
+    rounds_list = []
+    for r in range(max_round, -1, -1):
+        mids_in_round = [mid for mid, rn in round_assignment.items() if rn == r]
+        num = len(mids_in_round)
+        round_name = _ROUND_NAMES.get(num, f"Round of {num * 2}")
+
+        match_dicts = []
+        for mid in mids_in_round:
+            parts = match_parts.get(mid, [])
+            p1 = parts[0][1] if len(parts) > 0 else "?"
+            p2 = parts[1][1] if len(parts) > 1 else "?"
+            s1 = score_map.get((mid, parts[0][0])) if len(parts) > 0 else None
+            s2 = score_map.get((mid, parts[1][0])) if len(parts) > 1 else None
+            if s1 is not None and s2 is not None:
+                score = f"{s1} - {s2}"
+            else:
+                score = "- vs -"
+            match_dicts.append({"p1": p1, "p2": p2, "score": score})
+
+        rounds_list.append({"name": round_name, "matches": match_dicts})
+
+    return {"name": stage_label, "kind": "single_elimination", "rounds": rounds_list}
+
+
+def build_stages_from_db(conn, event_id: int):
+    """Load all tournament stages for an event from the database."""
+    stage_rows = conn.execute(
+        "SELECT es.id, es.kind, es.stage_order, es.status, sk.label AS name "
+        "FROM event_stages es "
+        "JOIN stage_kinds sk ON sk.kind = es.kind "
+        "WHERE es.event_id = ? ORDER BY es.stage_order",
+        (event_id,)
+    ).fetchall()
+
+    stages = []
+    for sr in stage_rows:
+        if sr["kind"] in ("groups", "round_robin"):
+            stages.append(_build_groups_stage(conn, sr["id"], sr["name"]))
+        elif sr["kind"] == "single_elimination":
+            stages.append(_build_bracket_stage(conn, sr["id"], sr["name"]))
+    return stages
+
+
+@app.get("/api/events/{event_id}/players")
+async def get_event_players(
+    request: Request,
+    event_id: int,
+    conn = Depends(get_db)
+):
+    # TODO: must add the possibility for the user to choose group size
+
+    session_id = request.state.session_id
+    session_data = get_session_data(conn, session_id)
+    olympiad_id = session_data["selected_olympiad_id"]
+
+    enrolled_players = conn.execute(
+        """
+        SELECT DISTINCT p.id, COALESCE(pl.name, t.name) AS name
+        FROM participants p
+        LEFT JOIN players pl ON pl.id = p.player_id
+        LEFT JOIN teams t ON t.id = p.team_id
+        JOIN group_participants gp ON gp.participant_id = p.id
+        JOIN groups g ON g.id = gp.group_id
+        JOIN event_stages es ON es.id = g.event_stage_id
+        WHERE es.event_id = ?
+        ORDER BY name
+        """,
+        (event_id,)
+    ).fetchall()
+    enrolled_participant_ids = {p["id"] for p in enrolled_players}
+
+    all_participants = conn.execute(
+        """
+        SELECT p.id, COALESCE(pl.name, t.name) AS name
+        FROM participants p
+        LEFT JOIN players pl ON pl.id = p.player_id
+        LEFT JOIN teams t ON t.id = p.team_id
+        WHERE COALESCE(pl.olympiad_id, t.olympiad_id) = ?
+        ORDER BY name
+        """,
+        (olympiad_id,)
+    ).fetchall()
+    available_players = [p for p in all_participants if p["id"] not in enrolled_participant_ids]
+
+    return templates.TemplateResponse(
+        request, "event_players_section.html",
         {
-            "name": "Fase a Gironi",
-            "kind": "groups",
-            "groups": [
-                {
-                    "name": "Girone A",
-                    "layout": "cards",
-                    "participants": p[:8],
-                    "matches": make_round_robin(p[:8]),
-                },
-                {
-                    "name": "Girone B",
-                    "layout": "grid",
-                    "participants": p[8:],
-                    "scores": matches_to_scores(matches_b),
-                }
-            ]
-        },
-        {
-            "name": "Eliminazione Diretta",
-            "kind": "single_elimination",
-            "rounds": [
-                {
-                    "name": "Semifinale",
-                    "matches": [
-                        {"p1": p[0], "p2": p[4], "score": "- vs -"},
-                    ]
-                },
-                {
-                    "name": "Finale",
-                    "matches": [
-                        {"p1": "?", "p2": "?", "score": "- vs -"},
-                    ]
-                }
-            ]
+            "enrolled_players": enrolled_players,
+            "available_players": available_players,
+            "event_id": event_id,
         }
-    ]
+    )
+
+
+@app.get("/api/events/{event_id}/stages")
+async def get_event_stages(
+    request: Request,
+    event_id: int,
+    conn = Depends(get_db)
+):
+    stages = build_stages_from_db(conn, event_id)
+
+    if not stages:
+        return HTMLResponse("<div class='no-stages-msg'>Nessuna fase configurata</div>")
+
+    return templates.TemplateResponse(
+        request, "event_stages_section.html",
+        {
+            "stage": stages[0],
+            "current_stage_index": 0,
+            "total_stages": len(stages),
+            "event_id": event_id,
+        }
+    )
 
 
 @app.get("/api/events/{event_id}/{event_version}")
@@ -538,32 +731,11 @@ async def select_event(
     if not event:
         return HTMLResponse("<div class='error-banner'>Evento non trovato</div>")
 
-    all_players = conn.execute(
-        "SELECT id, name FROM players WHERE olympiad_id = ? ORDER BY name",
-        (olympiad_id,)
-    ).fetchall()
-
-    all_players_list = [{"id": p["id"], "name": p["name"]} for p in all_players]
-    # MOCK: pad enrolled players to 20 with fake names
-    enrolled_players = all_players_list[:]
-    for i in range(len(enrolled_players) + 1, 21):
-        enrolled_players.append({"id": 1000 + i, "name": f"Giocatore {i}"})
-    available_players = []
-
-    enrolled_names = [p["name"] for p in enrolled_players]
-    stages = _build_mock_stages(enrolled_names)
-
     return templates.TemplateResponse(
         request, "event_page.html",
         {
             "event": {"id": event["id"], "name": event["name"], "version": event["version"],
                        "status": event["status"], "score_kind": event["score_kind"]},
-            "enrolled_players": enrolled_players,
-            "available_players": available_players,
-            "stages": stages,
-            "current_stage_index": 0,
-            "total_stages": len(stages),
-            "event_id": event["id"],
         }
     )
 
@@ -575,17 +747,7 @@ async def get_event_stage(
     stage_index: int,
     conn = Depends(get_db)
 ):
-    session_id = request.state.session_id
-    session_data = get_session_data(conn, session_id)
-    olympiad_id = session_data["selected_olympiad_id"]
-
-    all_players = conn.execute(
-        "SELECT name FROM players WHERE olympiad_id = ? ORDER BY name",
-        (olympiad_id,)
-    ).fetchall()
-
-    enrolled_names = [p["name"] for p in all_players[:3]]
-    stages = _build_mock_stages(enrolled_names)
+    stages = build_stages_from_db(conn, event_id)
 
     if stage_index < 0 or stage_index >= len(stages):
         return HTMLResponse("<div class='error-banner'>Fase non trovata</div>")
