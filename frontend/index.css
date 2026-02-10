@@ -630,13 +630,14 @@ body {
     align-items: center;
     justify-content: space-between;
     padding: 0.75rem 1rem;
-    background-color: #d1ecf1;
-    border-left: 4px solid #17a2b8;
-    color: #0c5460;
+    background-color: #17a2b8;
+    border: 1px solid #17a2b8;
+    color: #ffffff;
+    font-size: 1.25rem;
     font-weight: 500;
     font-style: italic;
     overflow: scroll;
-    max-height: 100px;
+    max-height: 200px;
     opacity: 1;
     transition: max-height 200ms ease-out, opacity 200ms ease-out, padding 200ms ease-out;
 }
@@ -660,15 +661,15 @@ body {
     margin-left: 1rem;
     padding: 0.25rem 0.75rem;
     font-size: 0.875rem;
-    color: #0c5460;
+    color: #ffffff;
     background-color: transparent;
-    border: 1px solid #0c5460;
+    border: 1px solid #ffffff;
     border-radius: 4px;
     transition: background-color 0.2s ease;
 }
 
 .entity-rename-message .dismiss-btn:hover {
-    background-color: rgba(12, 84, 96, 0.1);
+    background-color: rgba(255, 255, 255, 0.15);
 }
 
 /*
@@ -1124,26 +1125,53 @@ html.slide-back::view-transition-new(stage-slide) {
 }
 
 /*
- * Single elimination bracket
+ * Single elimination bracket - Grid-based layout
  */
 .stage-bracket {
-    display: flex;
-    gap: 2rem;
-    align-items: flex-start;
+    --bracket-match-height: 100px;
+    --bracket-gap: 1rem;
+
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 200px;
+    column-gap: 3rem;
     overflow-x: auto;
+    padding: 2rem;
+    align-items: center;
 }
 
 .bracket-round {
-    min-width: 180px;
     display: flex;
     flex-direction: column;
-    gap: 1rem;
+    justify-content: center;
+    height: 100%;
 }
 
 .bracket-round h4 {
-    margin: 0 0 0.5rem 0;
+    margin: 0 0 1.5rem 0;
     color: #2d2a4a;
     text-align: center;
+}
+
+/* Dynamically scale spacing - each round gets double the margin of the previous */
+.bracket-round:nth-child(1) .bracket-match:not(:last-child) {
+    margin-bottom: var(--bracket-gap);
+}
+
+.bracket-round:nth-child(2) .bracket-match:not(:last-child) {
+    margin-bottom: calc(var(--bracket-match-height) + var(--bracket-gap) * 2);
+}
+
+.bracket-round:nth-child(3) .bracket-match:not(:last-child) {
+    margin-bottom: calc(var(--bracket-match-height) * 3 + var(--bracket-gap) * 4);
+}
+
+.bracket-round:nth-child(4) .bracket-match:not(:last-child) {
+    margin-bottom: calc(var(--bracket-match-height) * 7 + var(--bracket-gap) * 8);
+}
+
+.bracket-round:nth-child(5) .bracket-match:not(:last-child) {
+    margin-bottom: calc(var(--bracket-match-height) * 15 + var(--bracket-gap) * 16);
 }
 
 .bracket-match {
