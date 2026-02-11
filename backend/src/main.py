@@ -10,7 +10,7 @@ from collections import defaultdict, deque
 import sqlite3
 
 import uvicorn
-from fastapi import FastAPI, Request, Form, Depends
+from fastapi import FastAPI, Request, Form, Query, Depends
 from fastapi.responses import JSONResponse, HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
@@ -134,7 +134,7 @@ def build_single_elimination_stage(request, conn, stage_id, stage_label):
             match_dicts.append({"p1": p1, "p2": p2, "score": score})
 
         rounds_list.append({"matches": match_dicts})
-    
+
     res = {
         "name": stage_label, "rounds": rounds_list, "id": stage_id
     }
@@ -444,6 +444,11 @@ async def session_middleware(request: Request, call_next):
 
     return response
 
+
+# ---------------------------------------------------------------------------
+# Static / infra
+# ---------------------------------------------------------------------------
+
 @app.get("/health")
 async def get_health():
     return JSONResponse(200)
@@ -479,6 +484,10 @@ async def get_badge(request: Request, conn = Depends(get_db)):
 
     return HTMLResponse(name)
 
+
+# ---------------------------------------------------------------------------
+# Olympiad CRUD
+# ---------------------------------------------------------------------------
 
 @app.get("/api/olympiads")
 async def list_olympiads(request: Request, conn = Depends(get_db)):
@@ -520,43 +529,6 @@ async def list_olympiads(request: Request, conn = Depends(get_db)):
     return templates.TemplateResponse(
         request, "entity_list.html",
         {"entities": "olympiads", "placeholder": placeholder, "items": rows}
-    )
-
-
-@app.get("/api/olympiads/{olympiad_id}/{olympiad_version}")
-async def select_olympiad(
-    request: Request,
-    olympiad_id: int,
-    olympiad_version: int,
-    conn = Depends(get_db)
-):
-    """Select an olympiad and update the olympiad badge"""
-    session_id = request.state.session_id
-
-    olympiad = conn.execute("SELECT id, name, version FROM olympiads WHERE id = ?", (olympiad_id,)).fetchone()
-
-    if not olympiad:
-        response = templates.TemplateResponse(request, "olympiad_not_found.html")
-        response.headers["HX-Retarget"] = "#main-content"
-        return response
-
-    if olympiad["version"] != olympiad_version:
-        response = templates.TemplateResponse(
-            request, "olympiad_name_changed.html", {"olympiad_name": olympiad["name"]}
-        )
-        response.headers["HX-Retarget"] = "#main-content"
-        return response
-
-    # Update session with the newly selected olympiad
-    conn.execute(
-        "UPDATE sessions SET (selected_olympiad_id, selected_olympiad_version) = (?, ?) WHERE id = ?",
-        (olympiad["id"], olympiad["version"], session_id)
-    )
-    conn.commit()
-
-    return templates.TemplateResponse(
-        request, "olympiad_badge.html",
-        {"olympiad": {"id": olympiad["id"], "name": olympiad["name"], "version": olympiad["version"]}}
     )
 
 
@@ -629,12 +601,49 @@ async def create_olympiad(
     return response
 
 
-@app.put("/api/olympiads/{olympiad_id}/{olympiad_version}")
+@app.get("/api/olympiads/{olympiad_id}")
+async def select_olympiad(
+    request: Request,
+    olympiad_id: int,
+    olympiad_version: int = Query(..., alias="version"),
+    conn = Depends(get_db)
+):
+    """Select an olympiad and update the olympiad badge"""
+    session_id = request.state.session_id
+
+    olympiad = conn.execute("SELECT id, name, version FROM olympiads WHERE id = ?", (olympiad_id,)).fetchone()
+
+    if not olympiad:
+        response = templates.TemplateResponse(request, "olympiad_not_found.html")
+        response.headers["HX-Retarget"] = "#main-content"
+        return response
+
+    if olympiad["version"] != olympiad_version:
+        response = templates.TemplateResponse(
+            request, "olympiad_name_changed.html", {"olympiad_name": olympiad["name"]}
+        )
+        response.headers["HX-Retarget"] = "#main-content"
+        return response
+
+    # Update session with the newly selected olympiad
+    conn.execute(
+        "UPDATE sessions SET (selected_olympiad_id, selected_olympiad_version) = (?, ?) WHERE id = ?",
+        (olympiad["id"], olympiad["version"], session_id)
+    )
+    conn.commit()
+
+    return templates.TemplateResponse(
+        request, "olympiad_badge.html",
+        {"olympiad": {"id": olympiad["id"], "name": olympiad["name"], "version": olympiad["version"]}}
+    )
+
+
+@app.put("/api/olympiads/{olympiad_id}")
 async def rename_olympiad(
     request: Request,
     olympiad_id: int,
-    olympiad_version: int,
     name: str = Form(...),
+    olympiad_version: int = Form(..., alias="version"),
     conn = Depends(get_db)
 ):
     session_id = request.state.session_id
@@ -688,11 +697,11 @@ async def rename_olympiad(
     )
 
 
-@app.delete("/api/olympiads/{olympiad_id}/{olympiad_version}")
+@app.delete("/api/olympiads/{olympiad_id}")
 async def delete_olympiad(
     request: Request,
     olympiad_id: int,
-    olympiad_version: int,
+    olympiad_version: int = Query(..., alias="version"),
     conn = Depends(get_db)
 ):
     session_id = request.state.session_id
@@ -735,119 +744,9 @@ async def delete_olympiad(
     )
 
 
-@app.get("/api/{entities}/{item_id}/{version}/edit")
-async def get_edit_textbox(
-    request: Request,
-    entities: EntityType,
-    item_id: int,
-    version: int,
-    name: str
-):
-    response = templates.TemplateResponse(
-        request, "edit_entity.html",
-        {
-            "curr_name": name,
-            "entities": entities.value,
-            "id": item_id,
-            "version": version
-        }
-    )
-    return response
-
-
-@app.get("/api/{entities}/{item_id}/{version}/cancel-edit")
-async def cancel_edit(
-    request: Request,
-    entities: EntityType,
-    item_id: int,
-    version: int,
-    name: str,
-):
-    hx_target = "#olympiad-badge-container" if entities == "olympiads" else "#main-content"
-    item = {"id": item_id, "name": name, "version": version}
-    response = templates.TemplateResponse(
-        request,
-        "entity_element.html",
-        {
-            "item": item,
-            "entities": entities.value,
-            "hx_target": hx_target
-        }
-    )
-    return response
-
-@app.get("/api/{entities}")
-async def list_entities(request: Request, entities: EntityType, conn = Depends(get_db)):
-    session_id = request.state.session_id
-
-    items = conn.execute(
-        f"""
-        SELECT e.id, e.name, e.version
-        FROM {entities.value} e
-        JOIN olympiads o ON o.id = e.olympiad_id
-        JOIN sessions s ON s.selected_olympiad_id = o.id AND s.selected_olympiad_version = o.version AND s.id = ?
-        """,
-        (session_id,)
-    ).fetchall()
-
-    if items:
-        placeholder = entity_list_form_placeholder[entities.value]
-        return templates.TemplateResponse(
-            request, "entity_list.html",
-            {"entities": entities.value, "placeholder": placeholder, "items": items}
-        )
-
-    # No rows returned - diagnose why with a single query
-    diag = conn.execute(
-        """
-        SELECT
-            s.selected_olympiad_id,
-            s.selected_olympiad_version as session_version,
-            o.id as olympiad_id,
-            o.name as olympiad_name,
-            o.version as olympiad_version
-        FROM sessions s
-        LEFT JOIN olympiads o ON o.id = s.selected_olympiad_id
-        WHERE s.id = ?
-        """,
-        (session_id,)
-    ).fetchone()
-
-    # Case 1: No olympiad selected
-    if diag["selected_olympiad_id"] is None:
-        return templates.TemplateResponse(
-            request, "select_olympiad_required.html", {"message": select_olympiad_message[entities.value]}
-        )
-
-    # Case 2: Olympiad was deleted
-    if diag["olympiad_id"] is None:
-        conn.execute(
-            "UPDATE sessions SET selected_olympiad_id = NULL, selected_olympiad_version = NULL WHERE id = ?",
-            (session_id,)
-        )
-        conn.commit()
-        return templates.TemplateResponse(request, "olympiad_not_found.html")
-
-    # Case 3: Olympiad version mismatch (was renamed)
-    if diag["olympiad_version"] != diag["session_version"]:
-        conn.execute(
-            "UPDATE sessions SET selected_olympiad_version = ? WHERE id = ?",
-            (diag["olympiad_version"], session_id)
-        )
-        conn.commit()
-        return templates.TemplateResponse(
-            request, "olympiad_name_changed.html",
-            {"olympiad_name": diag["olympiad_name"]}
-        )
-
-    # Case 4: Valid olympiad, just no entities yet
-    placeholder = entity_list_form_placeholder[entities.value]
-    return templates.TemplateResponse(
-        request, "entity_list.html",
-        {"entities": entities, "placeholder": placeholder, "items": []}
-    )
-
-
+# ---------------------------------------------------------------------------
+# Event-specific routes
+# ---------------------------------------------------------------------------
 
 @app.get("/api/events/{event_id}/players")
 async def get_event_players(
@@ -898,57 +797,6 @@ async def get_event_players(
     )
 
 
-@app.get("/api/events/{event_id}/{event_version}")
-async def select_event(
-    request: Request,
-    event_id: int,
-    event_version: int,
-    conn = Depends(get_db)
-):
-    session_id = request.state.session_id
-    session_data = get_session_data(conn, session_id)
-    olympiad_id = session_data["selected_olympiad_id"]
-
-    event = conn.execute(
-        f"""
-        SELECT id, name, version, current_stage_order, score_kind
-        FROM events
-        WHERE id = ?
-            AND version = ?
-            AND olympiad_id = ?""",
-        (event_id, event_version, olympiad_id)
-    ).fetchone()
-
-    if event:
-        max_stage = conn.execute(
-            "SELECT MAX(stage_order) AS max_order FROM event_stages WHERE event_id = ?",
-            (event_id,)
-        ).fetchone()
-        max_stage_order = max_stage["max_order"] if max_stage else None
-
-        event_status = utils.derive_event_status(
-            event["current_stage_order"],
-            max_stage_order
-        )
-
-        return templates.TemplateResponse(
-            request, "event_page.html",
-            {
-                "event": {
-                    "id": event["id"],
-                    "name": event["name"],
-                    "version": event["version"],
-                    "status": event_status,
-                },
-            }
-        )
-    else:
-        return diagnose_entity_noop(
-            request, EntityType.events, event_id, event_version, olympiad_id, session_id, conn,
-            "", {}
-        )
-
-
 @app.get("/api/events/{event_id}/stage/{stage_order}")
 async def get_event_stage(
     request: Request,
@@ -986,12 +834,12 @@ async def get_event_stage(
     ).fetchone()["count"]
 
     if stage_kind == "groups":
-        stage = utils.build_groups_stage(request, conn, stage_id, stage_label)
+        stage = build_groups_stage(request, conn, stage_id, stage_label)
     elif stage_kind == "round_robin":
         return HTMLResponse("<div class='error-banner'>Fase non trovata</div>")
     elif stage_kind == "single_elimination":
-        stage = utils.build_single_elimination_stage(request, conn, stage_id, stage_label)
-    
+        stage = build_single_elimination_stage(request, conn, stage_id, stage_label)
+
     response = templates.TemplateResponse(
         request, "event_stage.html",
         {
@@ -1082,7 +930,7 @@ async def resize_stage_groups(
     conn.commit()
 
     # Re-render only the groups section
-    stage = utils.build_groups_stage(request, conn, stage_id, "Tusorella")
+    stage = build_groups_stage(request, conn, stage_id, "Tusorella")
 
     return templates.TemplateResponse(
         request, "stage_groups.html",
@@ -1093,20 +941,163 @@ async def resize_stage_groups(
     )
 
 
-@app.put("/api/{entities}/{entity_id}/{entity_version}")
-async def rename_entity(
+@app.get("/api/events/{event_id}")
+async def select_event(
     request: Request,
-    entities: EntityType,
-    entity_id: int,
-    entity_version: int,
-    name: str = Form(...),
+    event_id: int,
+    event_version: int = Query(..., alias="version"),
     conn = Depends(get_db)
 ):
     session_id = request.state.session_id
     session_data = get_session_data(conn, session_id)
     olympiad_id = session_data["selected_olympiad_id"]
 
-    # Update only if correct version, belongs to selected olympiad, and session is authorized
+    event = conn.execute(
+        f"""
+        SELECT id, name, version, current_stage_order, score_kind
+        FROM events
+        WHERE id = ?
+            AND version = ?
+            AND olympiad_id = ?""",
+        (event_id, event_version, olympiad_id)
+    ).fetchone()
+
+    if event:
+        max_stage = conn.execute(
+            "SELECT MAX(stage_order) AS max_order FROM event_stages WHERE event_id = ?",
+            (event_id,)
+        ).fetchone()
+        max_stage_order = max_stage["max_order"] if max_stage else None
+
+        event_status = derive_event_status(
+            event["current_stage_order"],
+            max_stage_order
+        )
+
+        return templates.TemplateResponse(
+            request, "event_page.html",
+            {
+                "event": {
+                    "id": event["id"],
+                    "name": event["name"],
+                    "version": event["version"],
+                    "status": event_status,
+                },
+            }
+        )
+    else:
+        return diagnose_entity_noop(
+            request, EntityType.events, event_id, event_version, olympiad_id, session_id, conn,
+            "", {}
+        )
+
+
+# ---------------------------------------------------------------------------
+# Entity helpers — shared logic
+# ---------------------------------------------------------------------------
+
+async def _list_entities(request: Request, entities: EntityType, conn):
+    session_id = request.state.session_id
+
+    items = conn.execute(
+        f"""
+        SELECT e.id, e.name, e.version
+        FROM {entities.value} e
+        JOIN olympiads o ON o.id = e.olympiad_id
+        JOIN sessions s ON s.selected_olympiad_id = o.id AND s.selected_olympiad_version = o.version AND s.id = ?
+        """,
+        (session_id,)
+    ).fetchall()
+
+    if items:
+        placeholder = entity_list_form_placeholder[entities.value]
+        return templates.TemplateResponse(
+            request, "entity_list.html",
+            {"entities": entities.value, "placeholder": placeholder, "items": items}
+        )
+
+    # No rows returned - diagnose why with a single query
+    diag = conn.execute(
+        """
+        SELECT
+            s.selected_olympiad_id,
+            s.selected_olympiad_version as session_version,
+            o.id as olympiad_id,
+            o.name as olympiad_name,
+            o.version as olympiad_version
+        FROM sessions s
+        LEFT JOIN olympiads o ON o.id = s.selected_olympiad_id
+        WHERE s.id = ?
+        """,
+        (session_id,)
+    ).fetchone()
+
+    # Case 1: No olympiad selected
+    if diag["selected_olympiad_id"] is None:
+        return templates.TemplateResponse(
+            request, "select_olympiad_required.html", {"message": select_olympiad_message[entities.value]}
+        )
+
+    # Case 2: Olympiad was deleted
+    if diag["olympiad_id"] is None:
+        conn.execute(
+            "UPDATE sessions SET selected_olympiad_id = NULL, selected_olympiad_version = NULL WHERE id = ?",
+            (session_id,)
+        )
+        conn.commit()
+        return templates.TemplateResponse(request, "olympiad_not_found.html")
+
+    # Case 3: Olympiad version mismatch (was renamed)
+    if diag["olympiad_version"] != diag["session_version"]:
+        conn.execute(
+            "UPDATE sessions SET selected_olympiad_version = ? WHERE id = ?",
+            (diag["olympiad_version"], session_id)
+        )
+        conn.commit()
+        return templates.TemplateResponse(
+            request, "olympiad_name_changed.html",
+            {"olympiad_name": diag["olympiad_name"]}
+        )
+
+    # Case 4: Valid olympiad, just no entities yet
+    placeholder = entity_list_form_placeholder[entities.value]
+    return templates.TemplateResponse(
+        request, "entity_list.html",
+        {"entities": entities.value, "placeholder": placeholder, "items": []}
+    )
+
+
+async def _get_edit_textbox(request: Request, entities: EntityType, item_id: int, version: int, name: str):
+    return templates.TemplateResponse(
+        request, "edit_entity.html",
+        {
+            "curr_name": name,
+            "entities": entities.value,
+            "id": item_id,
+            "version": version
+        }
+    )
+
+
+async def _cancel_edit(request: Request, entities: EntityType, item_id: int, version: int, name: str):
+    hx_target = "#olympiad-badge-container" if entities == EntityType.olympiads else "#main-content"
+    item = {"id": item_id, "name": name, "version": version}
+    return templates.TemplateResponse(
+        request,
+        "entity_element.html",
+        {
+            "item": item,
+            "entities": entities.value,
+            "hx_target": hx_target
+        }
+    )
+
+
+async def _rename_entity(request: Request, entities: EntityType, entity_id: int, name: str, entity_version: int, conn):
+    session_id = request.state.session_id
+    session_data = get_session_data(conn, session_id)
+    olympiad_id = session_data["selected_olympiad_id"]
+
     try:
         updated_row = conn.execute(
             f"""
@@ -1124,7 +1115,6 @@ async def rename_entity(
             (name, entity_id, entity_version, olympiad_id, session_id, olympiad_id)
         ).fetchone()
     except sqlite3.IntegrityError:
-        # Duplicate name within the olympiad
         response = HTMLResponse(templates.get_template("entity_name_duplicate.html").render())
         response.headers["HX-Retarget"] = "#modal-container"
         response.headers["HX-Reswap"] = "innerHTML"
@@ -1141,7 +1131,6 @@ async def rename_entity(
         response.headers["HX-Reswap"] = "outerHTML"
         return response
 
-    # Update was a no-op - diagnose why
     return diagnose_entity_noop(
         request, entities, entity_id, entity_version, olympiad_id, session_id, conn,
         f"rename_{entities.value}",
@@ -1149,20 +1138,11 @@ async def rename_entity(
     )
 
 
-@app.delete("/api/{entities}/{entity_id}/{entity_version}")
-async def delete_entity(
-    request: Request,
-    entities: EntityType,
-    entity_id: int,
-    entity_version: int,
-    conn = Depends(get_db)
-):
+async def _delete_entity(request: Request, entities: EntityType, entity_id: int, entity_version: int, conn):
     session_id = request.state.session_id
     session_data = get_session_data(conn, session_id)
-
     olympiad_id = session_data["selected_olympiad_id"]
 
-    # Delete only if correct version belongs to selected olympiad and session is authorized
     deleted_row = conn.execute(
         f"""
         DELETE FROM {entities.value}
@@ -1186,13 +1166,93 @@ async def delete_entity(
         response.headers["HX-Reswap"] = "outerHTML"
         return response
 
-    # Delete was a no-op - diagnose why
     return diagnose_entity_noop(
         request, entities, entity_id, entity_version, olympiad_id, session_id, conn,
         f"delete_{entities.value}",
         {"entity_id": entity_id, "version": entity_version, "entities": entities.value}
     )
 
+
+# ---------------------------------------------------------------------------
+# Explicit entity routes — players, teams, events, edit/cancel-edit
+# ---------------------------------------------------------------------------
+
+@app.get("/api/players")
+async def list_players(request: Request, conn=Depends(get_db)):
+    return await _list_entities(request, EntityType.players, conn)
+
+@app.get("/api/teams")
+async def list_teams(request: Request, conn=Depends(get_db)):
+    return await _list_entities(request, EntityType.teams, conn)
+
+@app.get("/api/events")
+async def list_events(request: Request, conn=Depends(get_db)):
+    return await _list_entities(request, EntityType.events, conn)
+
+
+@app.get("/api/olympiads/{item_id}/edit")
+async def get_edit_textbox_olympiads(request: Request, item_id: int, version: int = Query(...), name: str = Query(...)):
+    return await _get_edit_textbox(request, EntityType.olympiads, item_id, version, name)
+
+@app.get("/api/players/{item_id}/edit")
+async def get_edit_textbox_players(request: Request, item_id: int, version: int = Query(...), name: str = Query(...)):
+    return await _get_edit_textbox(request, EntityType.players, item_id, version, name)
+
+@app.get("/api/teams/{item_id}/edit")
+async def get_edit_textbox_teams(request: Request, item_id: int, version: int = Query(...), name: str = Query(...)):
+    return await _get_edit_textbox(request, EntityType.teams, item_id, version, name)
+
+@app.get("/api/events/{item_id}/edit")
+async def get_edit_textbox_events(request: Request, item_id: int, version: int = Query(...), name: str = Query(...)):
+    return await _get_edit_textbox(request, EntityType.events, item_id, version, name)
+
+
+@app.get("/api/olympiads/{item_id}/cancel-edit")
+async def cancel_edit_olympiads(request: Request, item_id: int, version: int = Query(...), name: str = Query(...)):
+    return await _cancel_edit(request, EntityType.olympiads, item_id, version, name)
+
+@app.get("/api/players/{item_id}/cancel-edit")
+async def cancel_edit_players(request: Request, item_id: int, version: int = Query(...), name: str = Query(...)):
+    return await _cancel_edit(request, EntityType.players, item_id, version, name)
+
+@app.get("/api/teams/{item_id}/cancel-edit")
+async def cancel_edit_teams(request: Request, item_id: int, version: int = Query(...), name: str = Query(...)):
+    return await _cancel_edit(request, EntityType.teams, item_id, version, name)
+
+@app.get("/api/events/{item_id}/cancel-edit")
+async def cancel_edit_events(request: Request, item_id: int, version: int = Query(...), name: str = Query(...)):
+    return await _cancel_edit(request, EntityType.events, item_id, version, name)
+
+
+@app.put("/api/players/{entity_id}")
+async def rename_players(request: Request, entity_id: int, name: str = Form(...), entity_version: int = Form(..., alias="version"), conn=Depends(get_db)):
+    return await _rename_entity(request, EntityType.players, entity_id, name, entity_version, conn)
+
+@app.put("/api/teams/{entity_id}")
+async def rename_teams(request: Request, entity_id: int, name: str = Form(...), entity_version: int = Form(..., alias="version"), conn=Depends(get_db)):
+    return await _rename_entity(request, EntityType.teams, entity_id, name, entity_version, conn)
+
+@app.put("/api/events/{entity_id}")
+async def rename_events(request: Request, entity_id: int, name: str = Form(...), entity_version: int = Form(..., alias="version"), conn=Depends(get_db)):
+    return await _rename_entity(request, EntityType.events, entity_id, name, entity_version, conn)
+
+
+@app.delete("/api/players/{entity_id}")
+async def delete_players(request: Request, entity_id: int, entity_version: int = Query(..., alias="version"), conn=Depends(get_db)):
+    return await _delete_entity(request, EntityType.players, entity_id, entity_version, conn)
+
+@app.delete("/api/teams/{entity_id}")
+async def delete_teams(request: Request, entity_id: int, entity_version: int = Query(..., alias="version"), conn=Depends(get_db)):
+    return await _delete_entity(request, EntityType.teams, entity_id, entity_version, conn)
+
+@app.delete("/api/events/{entity_id}")
+async def delete_events(request: Request, entity_id: int, entity_version: int = Query(..., alias="version"), conn=Depends(get_db)):
+    return await _delete_entity(request, EntityType.events, entity_id, entity_version, conn)
+
+
+# ---------------------------------------------------------------------------
+# Auth
+# ---------------------------------------------------------------------------
 
 @app.post("/api/validate_pin")
 async def validate_pin(
@@ -1260,15 +1320,26 @@ async def validate_pin(
 async def _dispatch_action(request: Request, action_type: str, olympiad_id: int, params: dict, conn):
     """Dispatch to the actual endpoint function after PIN validation."""
     if action_type == "rename_olympiad":
-        response = await rename_olympiad(request, olympiad_id, params["version"], params["name"], conn)
+        response = await rename_olympiad(
+            request, olympiad_id, name=params["name"],
+            olympiad_version=params["version"], conn=conn
+        )
     elif action_type == "delete_olympiad":
-        response = await delete_olympiad(request, olympiad_id, params["version"], conn)
+        response = await delete_olympiad(
+            request, olympiad_id, olympiad_version=params["version"], conn=conn
+        )
     elif action_type == "delete_players" or action_type == "delete_teams" or action_type == "delete_events":
         entities = EntityType(params["entities"])
-        response = await delete_entity(request, entities, params["entity_id"], params["version"], conn)
+        response = await _delete_entity(
+            request, entities, params["entity_id"],
+            entity_version=params["version"], conn=conn
+        )
     elif action_type == "rename_players" or action_type == "rename_teams" or action_type == "rename_events":
         entities = EntityType(params["entities"])
-        response = await rename_entity(request, entities, params["entity_id"], params["version"], params["name"], conn)
+        response = await _rename_entity(
+            request, entities, params["entity_id"],
+            name=params["name"], entity_version=params["version"], conn=conn
+        )
     else:
         response = HTMLResponse("")
         response.headers["HX-Reswap"] = "none"
