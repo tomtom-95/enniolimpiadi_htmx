@@ -5,6 +5,7 @@ import secrets
 from enum import Enum
 from itertools import combinations
 from contextlib import asynccontextmanager
+from collections import defaultdict, deque
 
 import sqlite3
 
@@ -41,6 +42,191 @@ select_olympiad_message = {
     "events": "Seleziona un'olimpiade per visualizzare tutti gli eventi",
     "teams": "Seleziona un'olimpiade per visualizzare tutti i team",
 }
+
+
+def build_single_elimination_stage(request, conn, stage_id, stage_label):
+    """Build a single-elimination stage dict from DB data."""
+
+    # Load all bracket matches for this stage
+    rows = conn.execute(
+        "SELECT m.id AS match_id, bm.next_match_id "
+        "FROM groups g "
+        "JOIN matches m ON m.group_id = g.id "
+        "JOIN bracket_matches bm ON bm.match_id = m.id "
+        "WHERE g.event_stage_id = ?",
+        (stage_id,)
+    ).fetchall()
+
+    if not rows:
+        return {"name": stage_label, "rounds": [], "id": stage_id}
+
+    # Load participants for all these matches
+    match_ids = [r["match_id"] for r in rows]
+    placeholders = ",".join("?" * len(match_ids))
+    mp_rows = conn.execute(
+        f"SELECT mp.match_id, mp.participant_id, "
+        f"  COALESCE(pl.name, t.name) AS display_name "
+        f"FROM match_participants mp "
+        f"JOIN participants p ON p.id = mp.participant_id "
+        f"LEFT JOIN players pl ON pl.id = p.player_id "
+        f"LEFT JOIN teams t ON t.id = p.team_id "
+        f"WHERE mp.match_id IN ({placeholders})",
+        match_ids
+    ).fetchall()
+
+    # match_id -> list of (participant_id, name)
+    match_parts = defaultdict(list)
+    for r in mp_rows:
+        match_parts[r["match_id"]].append((r["participant_id"], r["display_name"]))
+
+    # Load scores
+    score_rows = conn.execute(
+        f"SELECT match_id, participant_id, score "
+        f"FROM match_participant_scores "
+        f"WHERE match_id IN ({placeholders})",
+        match_ids
+    ).fetchall()
+    score_map = {}
+    for r in score_rows:
+        score_map[(r["match_id"], r["participant_id"])] = r["score"]
+
+    # Build bracket tree
+    feeders = defaultdict(list)
+    matches_by_id = {}
+    for r in rows:
+        matches_by_id[r["match_id"]] = r
+        if r["next_match_id"] is not None:
+            feeders[r["next_match_id"]].append(r["match_id"])
+
+    # Find the final (next_match_id IS NULL)
+    final_id = None
+    for mid, r in matches_by_id.items():
+        if r["next_match_id"] is None:
+            final_id = mid
+            break
+
+    # BFS to assign round depths (0 = final)
+    round_assignment = {}
+    queue = deque([(final_id, 0)])
+    while queue:
+        mid, depth = queue.popleft()
+        round_assignment[mid] = depth
+        for feeder_id in feeders.get(mid, []):
+            queue.append((feeder_id, depth + 1))
+
+    # Group by round, earliest rounds first
+    max_round = max(round_assignment.values()) if round_assignment else 0
+    rounds_list = []
+    for r in range(max_round, -1, -1):
+        mids_in_round = [mid for mid, rn in round_assignment.items() if rn == r]
+
+        match_dicts = []
+        for mid in mids_in_round:
+            parts = match_parts.get(mid, [])
+            p1 = parts[0][1] if len(parts) > 0 else "?"
+            p2 = parts[1][1] if len(parts) > 1 else "?"
+            s1 = score_map.get((mid, parts[0][0])) if len(parts) > 0 else None
+            s2 = score_map.get((mid, parts[1][0])) if len(parts) > 1 else None
+            if s1 is not None and s2 is not None:
+                score = f"{s1} - {s2}"
+            else:
+                score = "- vs -"
+            match_dicts.append({"p1": p1, "p2": p2, "score": score})
+
+        rounds_list.append({"matches": match_dicts})
+    
+    res = {
+        "name": stage_label, "rounds": rounds_list, "id": stage_id
+    }
+
+    return res
+
+
+def derive_event_status(current_stage_order, max_stage_order):
+    """Derive the event's display status from current_stage_order.
+
+    - NULL → 'registration'
+    - <= max_stage_order → 'started'
+    - > max_stage_order → 'finished'
+    """
+    if current_stage_order is None:
+        return "registration"
+    if max_stage_order is not None and current_stage_order > max_stage_order:
+        return "finished"
+    return "started"
+
+
+def build_groups_stage(request, conn, stage_id: int, stage_label):
+    """Build and render a groups stage for display."""
+
+    # Build groups data
+    group_rows = conn.execute(
+        "SELECT id FROM groups WHERE event_stage_id = ? ORDER BY id",
+        (stage_id,)
+    ).fetchall()
+
+    groups = []
+    for idx, grow in enumerate(group_rows):
+        gid = grow["id"]
+
+        # Participant names in seed order
+        part_rows = conn.execute(
+            "SELECT gp.participant_id, COALESCE(pl.name, t.name) AS display_name "
+            "FROM group_participants gp "
+            "JOIN participants p ON p.id = gp.participant_id "
+            "LEFT JOIN players pl ON pl.id = p.player_id "
+            "LEFT JOIN teams t ON t.id = p.team_id "
+            "WHERE gp.group_id = ? ORDER BY gp.seed",
+            (gid,)
+        ).fetchall()
+
+        participants = [r["display_name"] for r in part_rows]
+        pid_to_name = {r["participant_id"]: r["display_name"] for r in part_rows}
+
+        match_rows = conn.execute(
+            "SELECT m.id, "
+            "  mp1.participant_id AS p1_id, mp2.participant_id AS p2_id, "
+            "  mps1.score AS p1_score, mps2.score AS p2_score "
+            "FROM matches m "
+            "JOIN match_participants mp1 ON mp1.match_id = m.id "
+            "JOIN match_participants mp2 ON mp2.match_id = m.id "
+            "  AND mp2.participant_id > mp1.participant_id "
+            "LEFT JOIN match_participant_scores mps1 "
+            "  ON mps1.match_id = m.id AND mps1.participant_id = mp1.participant_id "
+            "LEFT JOIN match_participant_scores mps2 "
+            "  ON mps2.match_id = m.id AND mps2.participant_id = mp2.participant_id "
+            "WHERE m.group_id = ?",
+            (gid,)
+        ).fetchall()
+
+        scores = {}
+        for mr in match_rows:
+            p1_name = pid_to_name.get(mr["p1_id"])
+            p2_name = pid_to_name.get(mr["p2_id"])
+            if p1_name and p2_name:
+                score_str = (
+                    f"{mr['p1_score']} - {mr['p2_score']}"
+                    if mr["p1_score"] is not None and mr["p2_score"] is not None
+                    else None
+                )
+                scores.setdefault(p1_name, {})[p2_name] = score_str
+
+        groups.append({
+            "name": f"Girone {chr(65 + idx)}",
+            "participants": participants,
+            "scores": scores,
+        })
+
+    total_participants = sum(len(g["participants"]) for g in groups)
+
+    stage = {
+        "name": stage_label,
+        "groups": groups,
+        "id": stage_id,
+        "total_participants": total_participants
+    }
+
+    return stage
 
 
 def trigger_badge_update(response: Response) -> None:
@@ -263,6 +449,20 @@ async def get_health():
     return JSONResponse(200)
 
 
+@app.get("/", response_class=HTMLResponse)
+async def read_root():
+    """Serve the main HTML file"""
+    html_path = root / "frontend" / "index.html"
+    return HTMLResponse(content=html_path.read_text())
+
+
+@app.get("/{filename}.css")
+async def serve_css(filename: str):
+    """Serve CSS files from frontend directory"""
+    css_path = root / "frontend" / f"{filename}.css"
+    return Response(content=css_path.read_text(), media_type="text/css")
+
+
 @app.get("/api/badge")
 async def get_badge(request: Request, conn = Depends(get_db)):
     """Return the current olympiad badge content based on session state."""
@@ -278,20 +478,6 @@ async def get_badge(request: Request, conn = Depends(get_db)):
         name = "Olympiad badge"
 
     return HTMLResponse(name)
-
-
-@app.get("/", response_class=HTMLResponse)
-async def read_root():
-    """Serve the main HTML file"""
-    html_path = root / "frontend" / "index.html"
-    return HTMLResponse(content=html_path.read_text())
-
-
-@app.get("/{filename}.css")
-async def serve_css(filename: str):
-    """Serve CSS files from frontend directory"""
-    css_path = root / "frontend" / f"{filename}.css"
-    return Response(content=css_path.read_text(), media_type="text/css")
 
 
 @app.get("/api/olympiads")
@@ -337,119 +523,6 @@ async def list_olympiads(request: Request, conn = Depends(get_db)):
     )
 
 
-@app.get("/api/{entities}/{item_id}/{version}/edit")
-async def get_edit_textbox(
-    request: Request,
-    entities: EntityType,
-    item_id: int,
-    version: int,
-    name: str
-):
-    response = templates.TemplateResponse(
-        request, "edit_entity.html",
-        {
-            "curr_name": name,
-            "entities": entities.value,
-            "id": item_id,
-            "version": version
-        }
-    )
-    return response
-
-
-@app.get("/api/{entities}/{item_id}/{version}/cancel-edit")
-async def cancel_edit(
-    request: Request,
-    entities: EntityType,
-    item_id: int,
-    version: int,
-    name: str,
-):
-    hx_target = "#olympiad-badge-container" if entities == "olympiads" else "#main-content"
-    item = {"id": item_id, "name": name, "version": version}
-    response = templates.TemplateResponse(
-        request,
-        "entity_element.html",
-        {
-            "item": item,
-            "entities": entities.value,
-            "hx_target": hx_target
-        }
-    )
-    return response
-
-@app.get("/api/{entities}")
-async def list_entities(request: Request, entities: EntityType, conn = Depends(get_db)):
-    session_id = request.state.session_id
-
-    items = conn.execute(
-        f"""
-        SELECT e.id, e.name, e.version
-        FROM {entities.value} e
-        JOIN olympiads o ON o.id = e.olympiad_id
-        JOIN sessions s ON s.selected_olympiad_id = o.id AND s.selected_olympiad_version = o.version AND s.id = ?
-        """,
-        (session_id,)
-    ).fetchall()
-
-    if items:
-        placeholder = entity_list_form_placeholder[entities.value]
-        return templates.TemplateResponse(
-            request, "entity_list.html",
-            {"entities": entities.value, "placeholder": placeholder, "items": items}
-        )
-
-    # No rows returned - diagnose why with a single query
-    diag = conn.execute(
-        """
-        SELECT
-            s.selected_olympiad_id,
-            s.selected_olympiad_version as session_version,
-            o.id as olympiad_id,
-            o.name as olympiad_name,
-            o.version as olympiad_version
-        FROM sessions s
-        LEFT JOIN olympiads o ON o.id = s.selected_olympiad_id
-        WHERE s.id = ?
-        """,
-        (session_id,)
-    ).fetchone()
-
-    # Case 1: No olympiad selected
-    if diag["selected_olympiad_id"] is None:
-        return templates.TemplateResponse(
-            request, "select_olympiad_required.html", {"message": select_olympiad_message[entities.value]}
-        )
-
-    # Case 2: Olympiad was deleted
-    if diag["olympiad_id"] is None:
-        conn.execute(
-            "UPDATE sessions SET selected_olympiad_id = NULL, selected_olympiad_version = NULL WHERE id = ?",
-            (session_id,)
-        )
-        conn.commit()
-        return templates.TemplateResponse(request, "olympiad_not_found.html")
-
-    # Case 3: Olympiad version mismatch (was renamed)
-    if diag["olympiad_version"] != diag["session_version"]:
-        conn.execute(
-            "UPDATE sessions SET selected_olympiad_version = ? WHERE id = ?",
-            (diag["olympiad_version"], session_id)
-        )
-        conn.commit()
-        return templates.TemplateResponse(
-            request, "olympiad_name_changed.html",
-            {"olympiad_name": diag["olympiad_name"]}
-        )
-
-    # Case 4: Valid olympiad, just no entities yet
-    placeholder = entity_list_form_placeholder[entities.value]
-    return templates.TemplateResponse(
-        request, "entity_list.html",
-        {"entities": entities, "placeholder": placeholder, "items": []}
-    )
-
-
 @app.get("/api/olympiads/{olympiad_id}/{olympiad_version}")
 async def select_olympiad(
     request: Request,
@@ -484,563 +557,6 @@ async def select_olympiad(
     return templates.TemplateResponse(
         request, "olympiad_badge.html",
         {"olympiad": {"id": olympiad["id"], "name": olympiad["name"], "version": olympiad["version"]}}
-    )
-
-_ROUND_NAMES = {1: "Finale", 2: "Semifinale", 4: "Quarti di Finale", 8: "Ottavi di Finale"}
-
-
-# def _build_groups_stage(conn, stage_id, stage_label, stage_status):
-#     """Build a groups/round-robin stage dict from DB data."""
-#     group_rows = conn.execute(
-#         "SELECT id FROM groups WHERE event_stage_id = ? ORDER BY id",
-#         (stage_id,)
-#     ).fetchall()
-# 
-#     groups = []
-#     for idx, grow in enumerate(group_rows):
-#         gid = grow["id"]
-# 
-#         # Participant names in seed order
-#         part_rows = conn.execute(
-#             "SELECT gp.participant_id, COALESCE(pl.name, t.name) AS display_name "
-#             "FROM group_participants gp "
-#             "JOIN participants p ON p.id = gp.participant_id "
-#             "LEFT JOIN players pl ON pl.id = p.player_id "
-#             "LEFT JOIN teams t ON t.id = p.team_id "
-#             "WHERE gp.group_id = ? ORDER BY gp.seed",
-#             (gid,)
-#         ).fetchall()
-# 
-#         participants = [r["display_name"] for r in part_rows]
-#         pid_to_name = {r["participant_id"]: r["display_name"] for r in part_rows}
-# 
-#         # Match scores (exclude bracket matches)
-#         match_rows = conn.execute(
-#             "SELECT m.id, "
-#             "  mp1.participant_id AS p1_id, mp2.participant_id AS p2_id, "
-#             "  mps1.score AS p1_score, mps2.score AS p2_score "
-#             "FROM matches m "
-#             "JOIN match_participants mp1 ON mp1.match_id = m.id "
-#             "JOIN match_participants mp2 ON mp2.match_id = m.id "
-#             "  AND mp2.participant_id > mp1.participant_id "
-#             "LEFT JOIN match_participant_scores mps1 "
-#             "  ON mps1.match_id = m.id AND mps1.participant_id = mp1.participant_id "
-#             "LEFT JOIN match_participant_scores mps2 "
-#             "  ON mps2.match_id = m.id AND mps2.participant_id = mp2.participant_id "
-#             "WHERE m.group_id = ? "
-#             "  AND NOT EXISTS (SELECT 1 FROM bracket_matches bm WHERE bm.match_id = m.id)",
-#             (gid,)
-#         ).fetchall()
-# 
-#         scores = {}
-#         for mr in match_rows:
-#             p1_name = pid_to_name.get(mr["p1_id"])
-#             p2_name = pid_to_name.get(mr["p2_id"])
-#             if p1_name and p2_name:
-#                 score_str = (
-#                     f"{mr['p1_score']} - {mr['p2_score']}"
-#                     if mr["p1_score"] is not None and mr["p2_score"] is not None
-#                     else None
-#                 )
-#                 scores.setdefault(p1_name, {})[p2_name] = score_str
-# 
-#         groups.append({
-#             "name": f"Girone {chr(65 + idx)}",
-#             "participants": participants,
-#             "scores": scores,
-#         })
-# 
-#     total_participants = sum(len(g["participants"]) for g in groups)
-# 
-#     result = {
-#         "name": stage_label,
-#         "kind": "groups",
-#         "groups": groups,
-#         "id": stage_id,
-#         "status": stage_status,
-#         "total_participants": total_participants
-#     }
-# 
-#     return result
-
-
-def _build_bracket_stage(conn, stage_id, stage_label, stage_status):
-    """Build a single-elimination stage dict from DB data."""
-    from collections import defaultdict, deque
-
-    # Load all bracket matches for this stage
-    rows = conn.execute(
-        "SELECT m.id AS match_id, bm.next_match_id "
-        "FROM groups g "
-        "JOIN matches m ON m.group_id = g.id "
-        "JOIN bracket_matches bm ON bm.match_id = m.id "
-        "WHERE g.event_stage_id = ?",
-        (stage_id,)
-    ).fetchall()
-
-    if not rows:
-        return {"name": stage_label, "kind": "single_elimination", "rounds": [],
-                "id": stage_id, "status": stage_status}
-
-    # Load participants for all these matches
-    match_ids = [r["match_id"] for r in rows]
-    placeholders = ",".join("?" * len(match_ids))
-    mp_rows = conn.execute(
-        f"SELECT mp.match_id, mp.participant_id, "
-        f"  COALESCE(pl.name, t.name) AS display_name "
-        f"FROM match_participants mp "
-        f"JOIN participants p ON p.id = mp.participant_id "
-        f"LEFT JOIN players pl ON pl.id = p.player_id "
-        f"LEFT JOIN teams t ON t.id = p.team_id "
-        f"WHERE mp.match_id IN ({placeholders})",
-        match_ids
-    ).fetchall()
-
-    # match_id -> list of (participant_id, name)
-    match_parts = defaultdict(list)
-    for r in mp_rows:
-        match_parts[r["match_id"]].append((r["participant_id"], r["display_name"]))
-
-    # Load scores
-    score_rows = conn.execute(
-        f"SELECT match_id, participant_id, score "
-        f"FROM match_participant_scores "
-        f"WHERE match_id IN ({placeholders})",
-        match_ids
-    ).fetchall()
-    score_map = {}
-    for r in score_rows:
-        score_map[(r["match_id"], r["participant_id"])] = r["score"]
-
-    # Build bracket tree
-    feeders = defaultdict(list)
-    matches_by_id = {}
-    for r in rows:
-        matches_by_id[r["match_id"]] = r
-        if r["next_match_id"] is not None:
-            feeders[r["next_match_id"]].append(r["match_id"])
-
-    # Find the final (next_match_id IS NULL)
-    final_id = None
-    for mid, r in matches_by_id.items():
-        if r["next_match_id"] is None:
-            final_id = mid
-            break
-
-    # BFS to assign round depths (0 = final)
-    round_assignment = {}
-    queue = deque([(final_id, 0)])
-    while queue:
-        mid, depth = queue.popleft()
-        round_assignment[mid] = depth
-        for feeder_id in feeders.get(mid, []):
-            queue.append((feeder_id, depth + 1))
-
-    # Group by round, earliest rounds first
-    max_round = max(round_assignment.values()) if round_assignment else 0
-    rounds_list = []
-    for r in range(max_round, -1, -1):
-        mids_in_round = [mid for mid, rn in round_assignment.items() if rn == r]
-        num = len(mids_in_round)
-        round_name = _ROUND_NAMES.get(num, f"Round of {num * 2}")
-
-        match_dicts = []
-        for mid in mids_in_round:
-            parts = match_parts.get(mid, [])
-            p1 = parts[0][1] if len(parts) > 0 else "?"
-            p2 = parts[1][1] if len(parts) > 1 else "?"
-            s1 = score_map.get((mid, parts[0][0])) if len(parts) > 0 else None
-            s2 = score_map.get((mid, parts[1][0])) if len(parts) > 1 else None
-            if s1 is not None and s2 is not None:
-                score = f"{s1} - {s2}"
-            else:
-                score = "- vs -"
-            match_dicts.append({"p1": p1, "p2": p2, "score": score})
-
-        rounds_list.append({"name": round_name, "matches": match_dicts})
-    
-    res = {
-        "name": stage_label, "kind": "single_elimination", "rounds": rounds_list,
-        "id": stage_id, "status": stage_status
-    }
-
-    return res
-
-
-def _derive_stage_status(stage_order, current_stage_order):
-    """Derive a stage's status from the event's current_stage_order.
-
-    - current_stage_order is None → all stages 'pending' (registration)
-    - stage_order < current_stage_order → 'finished'
-    - stage_order == current_stage_order → 'running'
-    - stage_order > current_stage_order → 'pending'
-    (when current_stage_order > all stage_orders, all are 'finished')
-    """
-    if current_stage_order is None:
-        return "pending"
-    if stage_order < current_stage_order:
-        return "finished"
-    if stage_order == current_stage_order:
-        return "running"
-    return "pending"
-
-
-def _derive_event_status(current_stage_order, max_stage_order):
-    """Derive the event's display status from current_stage_order.
-
-    - NULL → 'registration'
-    - <= max_stage_order → 'started'
-    - > max_stage_order → 'finished'
-    """
-    if current_stage_order is None:
-        return "registration"
-    if max_stage_order is not None and current_stage_order > max_stage_order:
-        return "finished"
-    return "started"
-
-
-def build_groups_stage(request, conn, stage_id: int, stage_label):
-    """Build and render a groups stage for display."""
-
-    # Build groups data
-    group_rows = conn.execute(
-        "SELECT id FROM groups WHERE event_stage_id = ? ORDER BY id",
-        (stage_id,)
-    ).fetchall()
-
-    groups = []
-    for idx, grow in enumerate(group_rows):
-        gid = grow["id"]
-
-        # Participant names in seed order
-        part_rows = conn.execute(
-            "SELECT gp.participant_id, COALESCE(pl.name, t.name) AS display_name "
-            "FROM group_participants gp "
-            "JOIN participants p ON p.id = gp.participant_id "
-            "LEFT JOIN players pl ON pl.id = p.player_id "
-            "LEFT JOIN teams t ON t.id = p.team_id "
-            "WHERE gp.group_id = ? ORDER BY gp.seed",
-            (gid,)
-        ).fetchall()
-
-        participants = [r["display_name"] for r in part_rows]
-        pid_to_name = {r["participant_id"]: r["display_name"] for r in part_rows}
-
-        match_rows = conn.execute(
-            "SELECT m.id, "
-            "  mp1.participant_id AS p1_id, mp2.participant_id AS p2_id, "
-            "  mps1.score AS p1_score, mps2.score AS p2_score "
-            "FROM matches m "
-            "JOIN match_participants mp1 ON mp1.match_id = m.id "
-            "JOIN match_participants mp2 ON mp2.match_id = m.id "
-            "  AND mp2.participant_id > mp1.participant_id "
-            "LEFT JOIN match_participant_scores mps1 "
-            "  ON mps1.match_id = m.id AND mps1.participant_id = mp1.participant_id "
-            "LEFT JOIN match_participant_scores mps2 "
-            "  ON mps2.match_id = m.id AND mps2.participant_id = mp2.participant_id "
-            "WHERE m.group_id = ?",
-            (gid,)
-        ).fetchall()
-
-        scores = {}
-        for mr in match_rows:
-            p1_name = pid_to_name.get(mr["p1_id"])
-            p2_name = pid_to_name.get(mr["p2_id"])
-            if p1_name and p2_name:
-                score_str = (
-                    f"{mr['p1_score']} - {mr['p2_score']}"
-                    if mr["p1_score"] is not None and mr["p2_score"] is not None
-                    else None
-                )
-                scores.setdefault(p1_name, {})[p2_name] = score_str
-
-        groups.append({
-            "name": f"Girone {chr(65 + idx)}",
-            "participants": participants,
-            "scores": scores,
-        })
-
-    total_participants = sum(len(g["participants"]) for g in groups)
-
-    stage = {
-        "name": stage_label,
-        "groups": groups,
-        "id": stage_id,
-        "total_participants": total_participants
-    }
-
-    return stage
-    
-
-def build_stages_from_db(conn, event_id: int):
-    """Load all tournament stages for an event from the database."""
-    event_row = conn.execute(
-        "SELECT current_stage_order FROM events WHERE id = ?",
-        (event_id,)
-    ).fetchone()
-    current_stage_order = event_row["current_stage_order"] if event_row else None
-
-    stage_rows = conn.execute(
-        "SELECT es.id, es.kind, es.stage_order, sk.label AS name "
-        "FROM event_stages es "
-        "JOIN stage_kinds sk ON sk.kind = es.kind "
-        "WHERE es.event_id = ? ORDER BY es.stage_order",
-        (event_id,)
-    ).fetchall()
-
-    stages = []
-    for sr in stage_rows:
-        derived_status = _derive_stage_status(sr["stage_order"], current_stage_order)
-        if sr["kind"] in ("groups", "round_robin"):
-            stages.append(_build_groups_stage(conn, sr["id"], sr["name"], derived_status))
-        elif sr["kind"] == "single_elimination":
-            stages.append(_build_bracket_stage(conn, sr["id"], sr["name"], derived_status))
-
-    return stages
-
-
-@app.get("/api/events/{event_id}/players")
-async def get_event_players(
-    request: Request,
-    event_id: int,
-    conn = Depends(get_db)
-):
-    session_id = request.state.session_id
-    session_data = get_session_data(conn, session_id)
-    olympiad_id = session_data["selected_olympiad_id"]
-
-    enrolled_players = conn.execute(
-        """
-        SELECT DISTINCT p.id, COALESCE(pl.name, t.name) AS name
-        FROM participants p
-        LEFT JOIN players pl ON pl.id = p.player_id
-        LEFT JOIN teams t ON t.id = p.team_id
-        JOIN group_participants gp ON gp.participant_id = p.id
-        JOIN groups g ON g.id = gp.group_id
-        JOIN event_stages es ON es.id = g.event_stage_id
-        WHERE es.event_id = ?
-        ORDER BY name
-        """,
-        (event_id,)
-    ).fetchall()
-    enrolled_participant_ids = {p["id"] for p in enrolled_players}
-
-    all_participants = conn.execute(
-        """
-        SELECT p.id, COALESCE(pl.name, t.name) AS name
-        FROM participants p
-        LEFT JOIN players pl ON pl.id = p.player_id
-        LEFT JOIN teams t ON t.id = p.team_id
-        WHERE COALESCE(pl.olympiad_id, t.olympiad_id) = ?
-        ORDER BY name
-        """,
-        (olympiad_id,)
-    ).fetchall()
-    available_players = [p for p in all_participants if p["id"] not in enrolled_participant_ids]
-
-    return templates.TemplateResponse(
-        request, "event_players_section.html",
-        {
-            "enrolled_players": enrolled_players,
-            "available_players": available_players,
-            "event_id": event_id,
-        }
-    )
-
-
-
-@app.get("/api/events/{event_id}/{event_version}")
-async def select_event(
-    request: Request,
-    event_id: int,
-    event_version: int,
-    conn = Depends(get_db)
-):
-    session_id = request.state.session_id
-    session_data = get_session_data(conn, session_id)
-    olympiad_id = session_data["selected_olympiad_id"]
-
-    event = conn.execute(
-        f"""
-        SELECT id, name, version, current_stage_order, score_kind
-        FROM events
-        WHERE id = ?
-            AND version = ?
-            AND olympiad_id = ?""",
-        (event_id, event_version, olympiad_id)
-    ).fetchone()
-
-    if event:
-        max_stage = conn.execute(
-            "SELECT MAX(stage_order) AS max_order FROM event_stages WHERE event_id = ?",
-            (event_id,)
-        ).fetchone()
-        max_stage_order = max_stage["max_order"] if max_stage else None
-
-        event_status = _derive_event_status(event["current_stage_order"], max_stage_order)
-
-        return templates.TemplateResponse(
-            request, "event_page.html",
-            {
-                "event": {
-                    "id": event["id"],
-                    "name": event["name"],
-                    "version": event["version"],
-                    "status": event_status,
-                },
-            }
-        )
-    else:
-        return diagnose_entity_noop(
-            request, EntityType.events, event_id, event_version, olympiad_id, session_id, conn,
-            "", {}
-        )
-
-
-@app.get("/api/events/{event_id}/stage/{stage_order}")
-async def get_event_stage(
-    request: Request,
-    event_id: int,
-    stage_order: int,
-    conn = Depends(get_db)
-):
-    row = conn.execute(
-        """
-        SELECT
-            e.current_stage_order,
-            es.id,
-            es.stage_order,
-            es.kind,
-            sk.label AS name
-        FROM events e
-        LEFT JOIN event_stages es ON es.event_id = e.id AND es.stage_order = ?
-        LEFT JOIN stage_kinds sk ON sk.kind = es.kind
-        WHERE e.id = ?
-        """,
-        (stage_order, event_id)
-    ).fetchone()
-
-    if not row or row["id"] is None:
-        return HTMLResponse("<div class='error-banner'>Fase non trovata</div>")
-
-    stage_id    = row["id"]
-    stage_kind  = row["kind"]
-    stage_label = row["name"]
-
-    # Get total number of stages for navigation
-    total_stages = conn.execute(
-        "SELECT COUNT(*) AS count FROM event_stages WHERE event_id = ?",
-        (event_id,)
-    ).fetchone()["count"]
-
-    if stage_kind == "groups":
-        stage = build_groups_stage(request, conn, stage_id, stage_label)
-    elif stage_kind == "round_robin":
-        # render the templates for the round_robin
-        # return HTMLResponse("<div class='error-banner'>Fase non trovata</div>")
-        pass
-    elif stage_kind == "single_elimination":
-        # render the templates for the brackets
-        return HTMLResponse("<div class='error-banner'>Fase non trovata</div>")
-    
-    response = templates.TemplateResponse(
-        request, "event_stage.html",
-        {
-            "stage": stage,
-            "stage_kind": "single_elimination",
-            "stage_order": stage_order,
-            "total_stages": total_stages,
-            "event_id": event_id,
-            "stage_id": stage_id
-        }
-    )
-
-    return response
-
-
-@app.post("/api/events/{event_id}/stages/{stage_id}/resize")
-async def resize_stage_groups(
-    request: Request,
-    event_id: int,
-    stage_id: int,
-    num_groups: int = Form(...),
-    conn = Depends(get_db)
-):
-    event_row = conn.execute(
-        "SELECT current_stage_order FROM events WHERE id = ?", (event_id,)
-    ).fetchone()
-    if not event_row or event_row["current_stage_order"] is not None:
-        return HTMLResponse("<div class='error-banner'>Resize consentito solo durante la registrazione</div>")
-
-    stage_row = conn.execute(
-        "SELECT id, stage_order, kind FROM event_stages WHERE id = ? AND event_id = ?",
-        (stage_id, event_id)
-    ).fetchone()
-    if not stage_row or stage_row["kind"] not in ("groups", "round_robin"):
-        return HTMLResponse("<div class='error-banner'>Fase non trovata o già iniziata</div>")
-
-    participant_rows = conn.execute(
-        "SELECT DISTINCT gp.participant_id "
-        "FROM group_participants gp "
-        "JOIN groups g ON g.id = gp.group_id "
-        "WHERE g.event_stage_id = ? "
-        "ORDER BY gp.participant_id",
-        (stage_id,)
-    ).fetchall()
-    participant_ids = [r["participant_id"] for r in participant_rows]
-    total = len(participant_ids)
-
-    if total < 2:
-        return HTMLResponse("<div class='error-banner'>Servono almeno 2 partecipanti</div>")
-
-    num_groups = max(1, min(num_groups, total // 2))
-
-    # Teardown: CASCADE handles group_participants, matches, match_participants, scores
-    conn.execute("DELETE FROM groups WHERE event_stage_id = ?", (stage_id,))
-
-    # Rebuild groups
-    buckets = [[] for _ in range(num_groups)]
-    for i, pid in enumerate(participant_ids):
-        buckets[i % num_groups].append(pid)
-
-    for bucket in buckets:
-        grow = conn.execute(
-            "INSERT INTO groups (event_stage_id) VALUES (?) RETURNING id",
-            (stage_id,)
-        ).fetchone()
-        gid = grow["id"]
-
-        for seed, pid in enumerate(bucket):
-            conn.execute(
-                "INSERT INTO group_participants (group_id, participant_id, seed) VALUES (?, ?, ?)",
-                (gid, pid, seed)
-            )
-
-        for p1, p2 in combinations(bucket, 2):
-            mrow = conn.execute(
-                "INSERT INTO matches (group_id) VALUES (?) RETURNING id",
-                (gid,)
-            ).fetchone()
-            conn.execute(
-                "INSERT INTO match_participants (match_id, participant_id) VALUES (?, ?)",
-                (mrow["id"], p1)
-            )
-            conn.execute(
-                "INSERT INTO match_participants (match_id, participant_id) VALUES (?, ?)",
-                (mrow["id"], p2)
-            )
-
-    conn.commit()
-
-    # Re-render only the groups section
-    stage = build_groups_stage(request, conn, stage_id, "Tusorella")
-
-    return templates.TemplateResponse(
-        request, "stage_groups.html",
-        {
-            "stage": stage,
-            "event_id": event_id
-        }
     )
 
 
@@ -1217,6 +733,365 @@ async def delete_olympiad(
         request, olympiad_id, olympiad_version, session_id, session_data, conn,
         "delete_olympiad", {"version": olympiad_version}
     )
+
+
+@app.get("/api/{entities}/{item_id}/{version}/edit")
+async def get_edit_textbox(
+    request: Request,
+    entities: EntityType,
+    item_id: int,
+    version: int,
+    name: str
+):
+    response = templates.TemplateResponse(
+        request, "edit_entity.html",
+        {
+            "curr_name": name,
+            "entities": entities.value,
+            "id": item_id,
+            "version": version
+        }
+    )
+    return response
+
+
+@app.get("/api/{entities}/{item_id}/{version}/cancel-edit")
+async def cancel_edit(
+    request: Request,
+    entities: EntityType,
+    item_id: int,
+    version: int,
+    name: str,
+):
+    hx_target = "#olympiad-badge-container" if entities == "olympiads" else "#main-content"
+    item = {"id": item_id, "name": name, "version": version}
+    response = templates.TemplateResponse(
+        request,
+        "entity_element.html",
+        {
+            "item": item,
+            "entities": entities.value,
+            "hx_target": hx_target
+        }
+    )
+    return response
+
+@app.get("/api/{entities}")
+async def list_entities(request: Request, entities: EntityType, conn = Depends(get_db)):
+    session_id = request.state.session_id
+
+    items = conn.execute(
+        f"""
+        SELECT e.id, e.name, e.version
+        FROM {entities.value} e
+        JOIN olympiads o ON o.id = e.olympiad_id
+        JOIN sessions s ON s.selected_olympiad_id = o.id AND s.selected_olympiad_version = o.version AND s.id = ?
+        """,
+        (session_id,)
+    ).fetchall()
+
+    if items:
+        placeholder = entity_list_form_placeholder[entities.value]
+        return templates.TemplateResponse(
+            request, "entity_list.html",
+            {"entities": entities.value, "placeholder": placeholder, "items": items}
+        )
+
+    # No rows returned - diagnose why with a single query
+    diag = conn.execute(
+        """
+        SELECT
+            s.selected_olympiad_id,
+            s.selected_olympiad_version as session_version,
+            o.id as olympiad_id,
+            o.name as olympiad_name,
+            o.version as olympiad_version
+        FROM sessions s
+        LEFT JOIN olympiads o ON o.id = s.selected_olympiad_id
+        WHERE s.id = ?
+        """,
+        (session_id,)
+    ).fetchone()
+
+    # Case 1: No olympiad selected
+    if diag["selected_olympiad_id"] is None:
+        return templates.TemplateResponse(
+            request, "select_olympiad_required.html", {"message": select_olympiad_message[entities.value]}
+        )
+
+    # Case 2: Olympiad was deleted
+    if diag["olympiad_id"] is None:
+        conn.execute(
+            "UPDATE sessions SET selected_olympiad_id = NULL, selected_olympiad_version = NULL WHERE id = ?",
+            (session_id,)
+        )
+        conn.commit()
+        return templates.TemplateResponse(request, "olympiad_not_found.html")
+
+    # Case 3: Olympiad version mismatch (was renamed)
+    if diag["olympiad_version"] != diag["session_version"]:
+        conn.execute(
+            "UPDATE sessions SET selected_olympiad_version = ? WHERE id = ?",
+            (diag["olympiad_version"], session_id)
+        )
+        conn.commit()
+        return templates.TemplateResponse(
+            request, "olympiad_name_changed.html",
+            {"olympiad_name": diag["olympiad_name"]}
+        )
+
+    # Case 4: Valid olympiad, just no entities yet
+    placeholder = entity_list_form_placeholder[entities.value]
+    return templates.TemplateResponse(
+        request, "entity_list.html",
+        {"entities": entities, "placeholder": placeholder, "items": []}
+    )
+
+
+
+@app.get("/api/events/{event_id}/players")
+async def get_event_players(
+    request: Request,
+    event_id: int,
+    conn = Depends(get_db)
+):
+    session_id = request.state.session_id
+    session_data = get_session_data(conn, session_id)
+    olympiad_id = session_data["selected_olympiad_id"]
+
+    enrolled_players = conn.execute(
+        """
+        SELECT DISTINCT p.id, COALESCE(pl.name, t.name) AS name
+        FROM participants p
+        LEFT JOIN players pl ON pl.id = p.player_id
+        LEFT JOIN teams t ON t.id = p.team_id
+        JOIN group_participants gp ON gp.participant_id = p.id
+        JOIN groups g ON g.id = gp.group_id
+        JOIN event_stages es ON es.id = g.event_stage_id
+        WHERE es.event_id = ?
+        ORDER BY name
+        """,
+        (event_id,)
+    ).fetchall()
+    enrolled_participant_ids = {p["id"] for p in enrolled_players}
+
+    all_participants = conn.execute(
+        """
+        SELECT p.id, COALESCE(pl.name, t.name) AS name
+        FROM participants p
+        LEFT JOIN players pl ON pl.id = p.player_id
+        LEFT JOIN teams t ON t.id = p.team_id
+        WHERE COALESCE(pl.olympiad_id, t.olympiad_id) = ?
+        ORDER BY name
+        """,
+        (olympiad_id,)
+    ).fetchall()
+    available_players = [p for p in all_participants if p["id"] not in enrolled_participant_ids]
+
+    return templates.TemplateResponse(
+        request, "event_players_section.html",
+        {
+            "enrolled_players": enrolled_players,
+            "available_players": available_players,
+            "event_id": event_id,
+        }
+    )
+
+
+@app.get("/api/events/{event_id}/{event_version}")
+async def select_event(
+    request: Request,
+    event_id: int,
+    event_version: int,
+    conn = Depends(get_db)
+):
+    session_id = request.state.session_id
+    session_data = get_session_data(conn, session_id)
+    olympiad_id = session_data["selected_olympiad_id"]
+
+    event = conn.execute(
+        f"""
+        SELECT id, name, version, current_stage_order, score_kind
+        FROM events
+        WHERE id = ?
+            AND version = ?
+            AND olympiad_id = ?""",
+        (event_id, event_version, olympiad_id)
+    ).fetchone()
+
+    if event:
+        max_stage = conn.execute(
+            "SELECT MAX(stage_order) AS max_order FROM event_stages WHERE event_id = ?",
+            (event_id,)
+        ).fetchone()
+        max_stage_order = max_stage["max_order"] if max_stage else None
+
+        event_status = utils.derive_event_status(
+            event["current_stage_order"],
+            max_stage_order
+        )
+
+        return templates.TemplateResponse(
+            request, "event_page.html",
+            {
+                "event": {
+                    "id": event["id"],
+                    "name": event["name"],
+                    "version": event["version"],
+                    "status": event_status,
+                },
+            }
+        )
+    else:
+        return diagnose_entity_noop(
+            request, EntityType.events, event_id, event_version, olympiad_id, session_id, conn,
+            "", {}
+        )
+
+
+@app.get("/api/events/{event_id}/stage/{stage_order}")
+async def get_event_stage(
+    request: Request,
+    event_id: int,
+    stage_order: int,
+    conn = Depends(get_db)
+):
+    row = conn.execute(
+        """
+        SELECT
+            e.current_stage_order,
+            es.id,
+            es.stage_order,
+            es.kind,
+            sk.label AS name
+        FROM events e
+        LEFT JOIN event_stages es ON es.event_id = e.id AND es.stage_order = ?
+        LEFT JOIN stage_kinds sk ON sk.kind = es.kind
+        WHERE e.id = ?
+        """,
+        (stage_order, event_id)
+    ).fetchone()
+
+    if not row or row["id"] is None:
+        return HTMLResponse("<div class='error-banner'>Fase non trovata</div>")
+
+    stage_id    = row["id"]
+    stage_kind  = row["kind"]
+    stage_label = row["name"]
+
+    # Get total number of stages for navigation
+    total_stages = conn.execute(
+        "SELECT COUNT(*) AS count FROM event_stages WHERE event_id = ?",
+        (event_id,)
+    ).fetchone()["count"]
+
+    if stage_kind == "groups":
+        stage = utils.build_groups_stage(request, conn, stage_id, stage_label)
+    elif stage_kind == "round_robin":
+        return HTMLResponse("<div class='error-banner'>Fase non trovata</div>")
+    elif stage_kind == "single_elimination":
+        stage = utils.build_single_elimination_stage(request, conn, stage_id, stage_label)
+    
+    response = templates.TemplateResponse(
+        request, "event_stage.html",
+        {
+            "stage": stage,
+            "stage_kind": stage_kind,
+            "stage_order": stage_order,
+            "total_stages": total_stages,
+            "event_id": event_id,
+            "stage_id": stage_id
+        }
+    )
+
+    return response
+
+
+@app.post("/api/events/{event_id}/stages/{stage_id}/resize")
+async def resize_stage_groups(
+    request: Request,
+    event_id: int,
+    stage_id: int,
+    num_groups: int = Form(...),
+    conn = Depends(get_db)
+):
+    event_row = conn.execute(
+        "SELECT current_stage_order FROM events WHERE id = ?", (event_id,)
+    ).fetchone()
+    if not event_row or event_row["current_stage_order"] is not None:
+        return HTMLResponse("<div class='error-banner'>Resize consentito solo durante la registrazione</div>")
+
+    stage_row = conn.execute(
+        "SELECT id, stage_order, kind FROM event_stages WHERE id = ? AND event_id = ?",
+        (stage_id, event_id)
+    ).fetchone()
+    if not stage_row or stage_row["kind"] not in ("groups", "round_robin"):
+        return HTMLResponse("<div class='error-banner'>Fase non trovata o già iniziata</div>")
+
+    participant_rows = conn.execute(
+        "SELECT DISTINCT gp.participant_id "
+        "FROM group_participants gp "
+        "JOIN groups g ON g.id = gp.group_id "
+        "WHERE g.event_stage_id = ? "
+        "ORDER BY gp.participant_id",
+        (stage_id,)
+    ).fetchall()
+    participant_ids = [r["participant_id"] for r in participant_rows]
+    total = len(participant_ids)
+
+    if total < 2:
+        return HTMLResponse("<div class='error-banner'>Servono almeno 2 partecipanti</div>")
+
+    num_groups = max(1, min(num_groups, total // 2))
+
+    # Teardown: CASCADE handles group_participants, matches, match_participants, scores
+    conn.execute("DELETE FROM groups WHERE event_stage_id = ?", (stage_id,))
+
+    # Rebuild groups
+    buckets = [[] for _ in range(num_groups)]
+    for i, pid in enumerate(participant_ids):
+        buckets[i % num_groups].append(pid)
+
+    for bucket in buckets:
+        grow = conn.execute(
+            "INSERT INTO groups (event_stage_id) VALUES (?) RETURNING id",
+            (stage_id,)
+        ).fetchone()
+        gid = grow["id"]
+
+        for seed, pid in enumerate(bucket):
+            conn.execute(
+                "INSERT INTO group_participants (group_id, participant_id, seed) VALUES (?, ?, ?)",
+                (gid, pid, seed)
+            )
+
+        for p1, p2 in combinations(bucket, 2):
+            mrow = conn.execute(
+                "INSERT INTO matches (group_id) VALUES (?) RETURNING id",
+                (gid,)
+            ).fetchone()
+            conn.execute(
+                "INSERT INTO match_participants (match_id, participant_id) VALUES (?, ?)",
+                (mrow["id"], p1)
+            )
+            conn.execute(
+                "INSERT INTO match_participants (match_id, participant_id) VALUES (?, ?)",
+                (mrow["id"], p2)
+            )
+
+    conn.commit()
+
+    # Re-render only the groups section
+    stage = utils.build_groups_stage(request, conn, stage_id, "Tusorella")
+
+    return templates.TemplateResponse(
+        request, "stage_groups.html",
+        {
+            "stage": stage,
+            "event_id": event_id
+        }
+    )
+
 
 @app.put("/api/{entities}/{entity_id}/{entity_version}")
 async def rename_entity(

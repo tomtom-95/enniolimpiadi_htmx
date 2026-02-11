@@ -1126,52 +1126,18 @@ html.slide-back::view-transition-new(stage-slide) {
 
 /*
  * Single elimination bracket - Grid-based layout
+ *
+ * Uses a single flat grid. The template computes grid-row/grid-column
+ * inline for each match based on: row = m * 2^(r+1) + 2^r + 1
+ * where r = round index, m = match index (both 0-based),
+ * +1 because row 1 is reserved for headers.
  */
 .stage-bracket {
-    --bracket-match-height: 100px;
-    --bracket-gap: 1rem;
-
     display: grid;
-    grid-auto-flow: column;
-    grid-auto-columns: 200px;
     column-gap: 3rem;
+    row-gap: 1.5rem;
     overflow-x: auto;
     padding: 2rem;
-    align-items: center;
-}
-
-.bracket-round {
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    height: 100%;
-}
-
-.bracket-round h4 {
-    margin: 0 0 1.5rem 0;
-    color: #2d2a4a;
-    text-align: center;
-}
-
-/* Dynamically scale spacing - each round gets double the margin of the previous */
-.bracket-round:nth-child(1) .bracket-match:not(:last-child) {
-    margin-bottom: var(--bracket-gap);
-}
-
-.bracket-round:nth-child(2) .bracket-match:not(:last-child) {
-    margin-bottom: calc(var(--bracket-match-height) + var(--bracket-gap) * 2);
-}
-
-.bracket-round:nth-child(3) .bracket-match:not(:last-child) {
-    margin-bottom: calc(var(--bracket-match-height) * 3 + var(--bracket-gap) * 4);
-}
-
-.bracket-round:nth-child(4) .bracket-match:not(:last-child) {
-    margin-bottom: calc(var(--bracket-match-height) * 7 + var(--bracket-gap) * 8);
-}
-
-.bracket-round:nth-child(5) .bracket-match:not(:last-child) {
-    margin-bottom: calc(var(--bracket-match-height) * 15 + var(--bracket-gap) * 16);
 }
 
 .bracket-match {
@@ -1179,6 +1145,7 @@ html.slide-back::view-transition-new(stage-slide) {
     border-radius: 4px;
     border-left: 3px solid #2d2a4a;
     overflow: hidden;
+    align-self: center;
 }
 
 .bracket-participant {

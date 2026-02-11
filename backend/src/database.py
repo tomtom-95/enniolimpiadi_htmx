@@ -167,6 +167,43 @@ def seed_dummy_data(db_path: Path):
             conn.execute("INSERT INTO match_participant_scores (match_id, participant_id, score) VALUES (?, ?, ?)", (match_id, p1, s1))
             conn.execute("INSERT INTO match_participant_scores (match_id, participant_id, score) VALUES (?, ?, ?)", (match_id, p2, s2))
 
+        # Single elimination bracket (event_stage_id=2, group_id=3)
+        # 8 players → 4 QF + 2 SF + 1 Final = 7 matches
+        bracket_match_ids = []
+        for _ in range(7):
+            row = conn.execute("INSERT INTO matches (group_id) VALUES (?) RETURNING id", (3,)).fetchone()
+            bracket_match_ids.append(row["id"])
+
+        qf1, qf2, qf3, qf4, sf1, sf2, final = bracket_match_ids
+
+        # Wire up the bracket tree: QF → SF → Final
+        conn.execute("INSERT INTO bracket_matches (match_id, next_match_id) VALUES (?, ?)", (qf1, sf1))
+        conn.execute("INSERT INTO bracket_matches (match_id, next_match_id) VALUES (?, ?)", (qf2, sf1))
+        conn.execute("INSERT INTO bracket_matches (match_id, next_match_id) VALUES (?, ?)", (qf3, sf2))
+        conn.execute("INSERT INTO bracket_matches (match_id, next_match_id) VALUES (?, ?)", (qf4, sf2))
+        conn.execute("INSERT INTO bracket_matches (match_id, next_match_id) VALUES (?, ?)", (sf1, final))
+        conn.execute("INSERT INTO bracket_matches (match_id, next_match_id) VALUES (?, ?)", (sf2, final))
+        conn.execute("INSERT INTO bracket_matches (match_id, next_match_id) VALUES (?, NULL)", (final,))
+
+        # Assign participants to bracket matches
+        bracket_participants = [
+            (qf1, 1, 2), (qf2, 3, 4), (qf3, 5, 6), (qf4, 7, 8),
+            (sf1, 1, 3), (sf2, 5, 7),
+            (final, 1, 5),
+        ]
+        for mid, p1, p2 in bracket_participants:
+            conn.execute("INSERT INTO match_participants (match_id, participant_id) VALUES (?, ?)", (mid, p1))
+            conn.execute("INSERT INTO match_participants (match_id, participant_id) VALUES (?, ?)", (mid, p2))
+
+        # Add scores for QF matches
+        bracket_scores = [
+            (qf1, 1, 3, 2, 1), (qf2, 3, 2, 4, 0),
+            (qf3, 5, 1, 6, 3), (qf4, 7, 3, 8, 2),
+        ]
+        for mid, p1, s1, p2, s2 in bracket_scores:
+            conn.execute("INSERT INTO match_participant_scores (match_id, participant_id, score) VALUES (?, ?, ?)", (mid, p1, s1))
+            conn.execute("INSERT INTO match_participant_scores (match_id, participant_id, score) VALUES (?, ?, ?)", (mid, p2, s2))
+
         conn.commit()
     finally:
         conn.close()

@@ -1,66 +1,26 @@
 <div id="stage-bracket-content">
-    <div class="stage-bracket">
-        {% if stage.rounds %}
-            {% for round in stage.rounds %}
-                <div class="bracket-round">
-                    <h4>{{ round.name }}</h4>
-                    {% for match in round.matches %}
-                        <div class="bracket-match">
-                            <div class="bracket-participant bracket-top">{{ match.p1 }}</div>
-                            <div class="bracket-score">{{ match.score }}</div>
-                            <div class="bracket-participant bracket-bottom">{{ match.p2 }}</div>
-                        </div>
-                    {% endfor %}
+    {% set rounds = stage.rounds %}
+    {% if rounds %}
+    {% set first_round_matches = rounds[0].matches | length %}
+    {% set total_rows = first_round_matches * 2 %}
+    {% set num_rounds = rounds | length %}
+
+    <div class="stage-bracket" style="grid-template-columns: repeat({{ num_rounds }}, 200px); grid-template-rows: repeat({{ total_rows }}, 1fr);">
+        {% for round in rounds %}
+            {% set r = loop.index0 %}
+            {% for match in round.matches %}
+                {% set m = loop.index0 %}
+                {% set row_start = m * (2 ** (r + 1)) + (2 ** r) %}
+                <div class="bracket-match"
+                     style="grid-column: {{ r + 1 }}; grid-row: {{ row_start }} / span 2;">
+                    <div class="bracket-participant bracket-top">{{ match.p1 }}</div>
+                    <div class="bracket-score">{{ match.score }}</div>
+                    <div class="bracket-participant bracket-bottom">{{ match.p2 }}</div>
                 </div>
             {% endfor %}
-        {% else %}
-            {# Mock data for testing #}
-            <div class="bracket-round">
-                <h4>Quarti di Finale</h4>
-                <div class="bracket-match">
-                    <div class="bracket-participant bracket-top">Mario Rossi</div>
-                    <div class="bracket-score">3 - 1</div>
-                    <div class="bracket-participant bracket-bottom">Luigi Verdi</div>
-                </div>
-                <div class="bracket-match">
-                    <div class="bracket-participant bracket-top">Anna Bianchi</div>
-                    <div class="bracket-score">2 - 2</div>
-                    <div class="bracket-participant bracket-bottom">Sofia Neri</div>
-                </div>
-                <div class="bracket-match">
-                    <div class="bracket-participant bracket-top">Marco Gialli</div>
-                    <div class="bracket-score">-</div>
-                    <div class="bracket-participant bracket-bottom">Paolo Blu</div>
-                </div>
-                <div class="bracket-match">
-                    <div class="bracket-participant bracket-top">Giulia Rosa</div>
-                    <div class="bracket-score">1 - 3</div>
-                    <div class="bracket-participant bracket-bottom">Luca Viola</div>
-                </div>
-            </div>
-
-            <div class="bracket-round">
-                <h4>Semifinali</h4>
-                <div class="bracket-match">
-                    <div class="bracket-participant bracket-top">Mario Rossi</div>
-                    <div class="bracket-score">-</div>
-                    <div class="bracket-participant bracket-bottom">Anna Bianchi</div>
-                </div>
-                <div class="bracket-match">
-                    <div class="bracket-participant bracket-top">TBD</div>
-                    <div class="bracket-score">-</div>
-                    <div class="bracket-participant bracket-bottom">Luca Viola</div>
-                </div>
-            </div>
-
-            <div class="bracket-round">
-                <h4>Finale</h4>
-                <div class="bracket-match">
-                    <div class="bracket-participant bracket-top">TBD</div>
-                    <div class="bracket-score">-</div>
-                    <div class="bracket-participant bracket-bottom">TBD</div>
-                </div>
-            </div>
-        {% endif %}
+        {% endfor %}
     </div>
+    {% else %}
+    <p>Nessun incontro in questa fase.</p>
+    {% endif %}
 </div>
