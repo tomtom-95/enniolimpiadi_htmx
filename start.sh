@@ -6,20 +6,20 @@ export PROJECT_ROOT="$SCRIPT_DIR"
 export DATABASE_PATH="$SCRIPT_DIR/backend/olympiad.db"
 export SCHEMA_PATH="$SCRIPT_DIR/backend/schema.sql"
 
-cd backend
-
 # Create virtual environment if it doesn't exist
-if [ ! -d "venv" ]; then
+if [ ! -d "$SCRIPT_DIR/venv" ]; then
     echo "Creating virtual environment..."
-    python3 -m venv venv
+    python3 -m venv "$SCRIPT_DIR/venv"
 fi
 
 # Activate virtual environment
-source venv/bin/activate
+source "$SCRIPT_DIR/venv/bin/activate"
 
 # Install requirements
 echo "Installing requirements..."
-pip install -r requirements.txt -q
+pip install -r "$SCRIPT_DIR/backend/requirements.txt" -q
+
+cd "$SCRIPT_DIR/backend"
 
 case "$1" in
     test)
