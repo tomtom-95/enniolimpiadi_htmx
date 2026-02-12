@@ -10,7 +10,7 @@ from collections import defaultdict, deque
 import sqlite3
 
 import uvicorn
-from fastapi import FastAPI, Request, Form, Query, Depends
+from fastapi import FastAPI, Request, Form, Query
 from fastapi.responses import JSONResponse, HTMLResponse, Response
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
@@ -396,13 +396,6 @@ def diagnose_olympiad_noop(
     return response
 
 
-def get_db():
-    conn = database.get_connection(db_path)
-    try:
-        yield conn
-    finally:
-        conn.close()
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     database.init_db(db_path, schema_path)
@@ -428,6 +421,7 @@ async def session_middleware(request: Request, call_next):
             conn.commit()
 
         request.state.session_id = session_id
+        request.state.conn = conn
 
         response = await call_next(request)
         response.set_cookie("session", session_id, httponly=True, max_age=86400)
@@ -461,8 +455,9 @@ def serve_css():
 
 
 @app.get("/api/badge")
-def get_badge(request: Request, conn = Depends(get_db)):
+def get_badge(request: Request):
     """Return the current olympiad badge content based on session state."""
+    conn = request.state.conn
     session_id = request.state.session_id
     row = conn.execute(
         "SELECT o.name FROM sessions s LEFT JOIN olympiads o ON s.selected_olympiad_id = o.id WHERE s.id = ?",
@@ -482,7 +477,8 @@ def get_badge(request: Request, conn = Depends(get_db)):
 # ---------------------------------------------------------------------------
 
 @app.get("/api/olympiads")
-def list_olympiads(request: Request, conn = Depends(get_db)):
+def list_olympiads(request: Request):
+    conn = request.state.conn
     session_id = request.state.session_id
     session_data = get_session_data(conn, session_id)
 
@@ -530,8 +526,9 @@ def create_olympiad(
     name: str = Form(None),
     pin: str = Form(None),
     params: str = Form(None),
-    conn = Depends(get_db)
 ):
+    conn = request.state.conn
+
     # If params provided (from modal resubmit), extract name from it
     if params:
         params_dict = json.loads(params)
@@ -598,9 +595,9 @@ def select_olympiad(
     request: Request,
     olympiad_id: int,
     olympiad_version: int = Query(..., alias="version"),
-    conn = Depends(get_db)
 ):
     """Select an olympiad and update the olympiad badge"""
+    conn = request.state.conn
     session_id = request.state.session_id
 
     olympiad = conn.execute("SELECT id, name, version FROM olympiads WHERE id = ?", (olympiad_id,)).fetchone()
@@ -636,8 +633,8 @@ def rename_olympiad(
     olympiad_id: int,
     name: str = Form(...),
     olympiad_version: int = Form(..., alias="version"),
-    conn = Depends(get_db)
 ):
+    conn = request.state.conn
     session_id = request.state.session_id
     session_data = get_session_data(conn, session_id)
 
@@ -694,8 +691,8 @@ def delete_olympiad(
     request: Request,
     olympiad_id: int,
     olympiad_version: int = Query(..., alias="version"),
-    conn = Depends(get_db)
 ):
+    conn = request.state.conn
     session_id = request.state.session_id
     session_data = get_session_data(conn, session_id)
 
@@ -745,8 +742,8 @@ def select_event(
     request: Request,
     event_id: int,
     event_version: int = Query(..., alias="version"),
-    conn = Depends(get_db)
 ):
+    conn = request.state.conn
     session_id = request.state.session_id
     session_data = get_session_data(conn, session_id)
     olympiad_id = session_data["selected_olympiad_id"]
@@ -795,8 +792,8 @@ def select_event(
 def get_event_players(
     request: Request,
     event_id: int,
-    conn = Depends(get_db)
 ):
+    conn = request.state.conn
     session_id = request.state.session_id
     session_data = get_session_data(conn, session_id)
     olympiad_id = session_data["selected_olympiad_id"]
@@ -845,8 +842,8 @@ def get_event_stage(
     request: Request,
     event_id: int,
     stage_order: int,
-    conn = Depends(get_db)
 ):
+    conn = request.state.conn
     row = conn.execute(
         """
         SELECT
@@ -904,8 +901,8 @@ def resize_stage_groups(
     event_id: int,
     stage_id: int,
     num_groups: int = Form(...),
-    conn = Depends(get_db)
 ):
+    conn = request.state.conn
     event_row = conn.execute(
         "SELECT current_stage_order FROM events WHERE id = ?", (event_id,)
     ).fetchone()
@@ -1170,16 +1167,16 @@ def _delete_entity(request: Request, entities: str, entity_id: int, entity_versi
 # ---------------------------------------------------------------------------
 
 @app.get("/api/players")
-def list_players(request: Request, conn=Depends(get_db)):
-    return _list_entities(request, "players", conn)
+def list_players(request: Request):
+    return _list_entities(request, "players", request.state.conn)
 
 @app.get("/api/teams")
-def list_teams(request: Request, conn=Depends(get_db)):
-    return _list_entities(request, "teams", conn)
+def list_teams(request: Request):
+    return _list_entities(request, "teams", request.state.conn)
 
 @app.get("/api/events")
-def list_events(request: Request, conn=Depends(get_db)):
-    return _list_entities(request, "events", conn)
+def list_events(request: Request):
+    return _list_entities(request, "events", request.state.conn)
 
 
 @app.get("/api/olympiads/{item_id}/edit")
@@ -1217,29 +1214,29 @@ def cancel_edit_events(request: Request, item_id: int, version: int = Query(...)
 
 
 @app.put("/api/players/{entity_id}")
-def rename_players(request: Request, entity_id: int, name: str = Form(...), entity_version: int = Form(..., alias="version"), conn=Depends(get_db)):
-    return _rename_entity(request, "players", entity_id, name, entity_version, conn)
+def rename_players(request: Request, entity_id: int, name: str = Form(...), entity_version: int = Form(..., alias="version")):
+    return _rename_entity(request, "players", entity_id, name, entity_version, request.state.conn)
 
 @app.put("/api/teams/{entity_id}")
-def rename_teams(request: Request, entity_id: int, name: str = Form(...), entity_version: int = Form(..., alias="version"), conn=Depends(get_db)):
-    return _rename_entity(request, "teams", entity_id, name, entity_version, conn)
+def rename_teams(request: Request, entity_id: int, name: str = Form(...), entity_version: int = Form(..., alias="version")):
+    return _rename_entity(request, "teams", entity_id, name, entity_version, request.state.conn)
 
 @app.put("/api/events/{entity_id}")
-def rename_events(request: Request, entity_id: int, name: str = Form(...), entity_version: int = Form(..., alias="version"), conn=Depends(get_db)):
-    return _rename_entity(request, "events", entity_id, name, entity_version, conn)
+def rename_events(request: Request, entity_id: int, name: str = Form(...), entity_version: int = Form(..., alias="version")):
+    return _rename_entity(request, "events", entity_id, name, entity_version, request.state.conn)
 
 
 @app.delete("/api/players/{entity_id}")
-def delete_players(request: Request, entity_id: int, entity_version: int = Query(..., alias="version"), conn=Depends(get_db)):
-    return _delete_entity(request, "players", entity_id, entity_version, conn)
+def delete_players(request: Request, entity_id: int, entity_version: int = Query(..., alias="version")):
+    return _delete_entity(request, "players", entity_id, entity_version, request.state.conn)
 
 @app.delete("/api/teams/{entity_id}")
-def delete_teams(request: Request, entity_id: int, entity_version: int = Query(..., alias="version"), conn=Depends(get_db)):
-    return _delete_entity(request, "teams", entity_id, entity_version, conn)
+def delete_teams(request: Request, entity_id: int, entity_version: int = Query(..., alias="version")):
+    return _delete_entity(request, "teams", entity_id, entity_version, request.state.conn)
 
 @app.delete("/api/events/{entity_id}")
-def delete_events(request: Request, entity_id: int, entity_version: int = Query(..., alias="version"), conn=Depends(get_db)):
-    return _delete_entity(request, "events", entity_id, entity_version, conn)
+def delete_events(request: Request, entity_id: int, entity_version: int = Query(..., alias="version")):
+    return _delete_entity(request, "events", entity_id, entity_version, request.state.conn)
 
 
 # ---------------------------------------------------------------------------
@@ -1253,8 +1250,8 @@ def validate_pin(
     action_type: str = Form(...),
     olympiad_id: int = Form(...),
     params: str = Form("{}"),
-    conn = Depends(get_db)
 ):
+    conn = request.state.conn
     session_id = request.state.session_id
     parsed_params = json.loads(params)
 
@@ -1274,7 +1271,7 @@ def validate_pin(
     if inserted:
         # PIN correct, auth granted - call the actual endpoint function
         conn.commit()
-        return _dispatch_action(request, action_type, olympiad_id, parsed_params, conn)
+        return _dispatch_action(request, action_type, olympiad_id, parsed_params)
 
     # No insert - diagnose why
     diag = conn.execute(
@@ -1306,19 +1303,20 @@ def validate_pin(
         return response
 
     # Olympiad doesn't exist - call endpoint anyway, it will handle the deleted case
-    return _dispatch_action(request, action_type, olympiad_id, parsed_params, conn)
+    return _dispatch_action(request, action_type, olympiad_id, parsed_params)
 
 
-def _dispatch_action(request: Request, action_type: str, olympiad_id: int, params: dict, conn):
+def _dispatch_action(request: Request, action_type: str, olympiad_id: int, params: dict):
     """Dispatch to the actual endpoint function after PIN validation."""
+    conn = request.state.conn
     if action_type == "rename_olympiad":
         response = rename_olympiad(
             request, olympiad_id, name=params["name"],
-            olympiad_version=params["version"], conn=conn
+            olympiad_version=params["version"]
         )
     elif action_type == "delete_olympiad":
         response = delete_olympiad(
-            request, olympiad_id, olympiad_version=params["version"], conn=conn
+            request, olympiad_id, olympiad_version=params["version"]
         )
     elif action_type == "delete_players" or action_type == "delete_teams" or action_type == "delete_events":
         entities = params["entities"]
