@@ -1165,3 +1165,111 @@ html.slide-back::view-transition-new(stage-slide) {
     text-align: center;
     color: #9995a8;
 }
+
+/*
+ * Event modal
+ */
+.event-modal {
+    width: 420px;
+    max-height: 80vh;
+    overflow-y: auto;
+}
+
+.form-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin-bottom: 1.25rem;
+}
+
+.form-label {
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: #2d2a4a;
+}
+
+/*
+ * Score kind toggle items
+ */
+.score-kind-item {
+    padding: 0.75rem 1rem;
+    margin-bottom: 0.5rem;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: #2d2a4a;
+    background-color: #fff;
+    border-left: 4px solid #e85d4c;
+    cursor: pointer;
+    transition: background-color 0.2s ease, border-left-color 0.2s ease, color 0.2s ease;
+}
+
+.score-kind-item:hover {
+    background-color: #f5f0e6;
+    border-left-color: #c94a3a;
+}
+
+.score-kind-item.active {
+    background-color: #2d2a4a;
+    color: #faf5eb;
+    border-left-color: #2d2a4a;
+}
+
+.score-kind-item.active:hover {
+    background-color: #e85d4c;
+    border-left-color: #e85d4c;
+}
+
+/*
+ * Modal section labels and list items
+ */
+.modal-section-label {
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: #2d2a4a;
+}
+
+.modal-subsection {
+    display: flex;
+    flex-direction: column;
+    max-height: 200px;
+    overflow-y: auto;
+    margin-bottom: 0.5rem;
+}
+
+.modal-list-item {
+    font-size: 0.9rem;
+    cursor: pointer;
+}
+
+.modal-add-btn {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #2d2a4a;
+    flex-shrink: 0;
+}
+
+.form-hint {
+    padding: 0.75rem 1rem;
+    font-size: 0.85rem;
+    color: #9995a8;
+    font-style: italic;
+}
+
+.btn-remove-stage {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    font-size: 1rem;
+    font-weight: 700;
+    color: #e85d4c;
+    background-color: transparent;
+    border: 2px solid #e85d4c;
+    border-radius: 4px;
+    flex-shrink: 0;
+    transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.btn-remove-stage:hover {
+    background-color: #e85d4c;
+    color: #fff;
+}

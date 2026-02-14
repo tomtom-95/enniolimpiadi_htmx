@@ -1,0 +1,11 @@
+<form class="entity-form" hx-get="/api/olympiads/create" hx-target="#modal-container">
+    <input type="text" name="name" placeholder="Aggiungi una nuova olimpiade" required>
+    <button type="submit">+</button>
+</form>
+<div id="entity-list">
+    {% set entities = "olympiads" %}
+    {% set hx_target = "#olympiad-badge-container" %}
+    {% for item in items %}
+        {% include 'entity_element.html' %}
+    {% endfor %}
+</div>

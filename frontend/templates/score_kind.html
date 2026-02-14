@@ -1,0 +1,11 @@
+<div id="score-kind-section">
+    {% for sk in score_kinds %}
+    <div class="score-kind-item {% if sk.kind == current_score_kind %}active{% endif %}"
+         hx-put="/api/events/{{ event_id }}/score-kind"
+         hx-vals='{"score_kind":"{{ sk.kind }}"}'
+         hx-target="#score-kind-section"
+         hx-swap="outerHTML">
+        {{ sk.label }}
+    </div>
+    {% endfor %}
+</div>

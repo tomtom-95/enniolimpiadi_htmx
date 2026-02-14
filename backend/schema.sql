@@ -59,6 +59,12 @@ CREATE TABLE participants (
     )
 );
 
+CREATE TABLE event_participants (
+    event_id INTEGER REFERENCES events(id) ON DELETE CASCADE,
+    participant_id INTEGER REFERENCES participants(id) ON DELETE CASCADE,
+    PRIMARY KEY (event_id, participant_id)
+);
+
 -- =====================
 -- TOURNAMENT STRUCTURE
 -- =====================
@@ -178,3 +184,4 @@ CREATE INDEX idx_group_participants_participant_id ON group_participants(partici
 CREATE INDEX idx_matches_group_id ON matches(group_id);
 CREATE INDEX idx_bracket_matches_next_match_id ON bracket_matches(next_match_id);
 CREATE INDEX idx_match_participants_participant_id ON match_participants(participant_id);
+CREATE INDEX idx_event_participants_participant_id ON event_participants(participant_id);

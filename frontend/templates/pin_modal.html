@@ -5,10 +5,16 @@
         {% if error %}
             <div class="error-banner">{{ error }}</div>
         {% endif %}
-        <form hx-post="{{ action }}" hx-target="#main-content" _="on htmx:afterRequest trigger closeModal on body">
-            <input type="hidden" name="action_type" value="{{ action_type }}">
-            <input type="hidden" name="olympiad_id" value="{{ olympiad_id }}">
-            <input type="hidden" name="params" value='{{ params | tojson }}'>
+        <form hx-post="{{ action }}" hx-target="#main-content"
+            _="on htmx:afterRequest trigger closeModal on body">
+            {% if replay_method %}
+                <input type="hidden" name="replay_method" value="{{ replay_method }}">
+                <input type="hidden" name="replay_url"    value="{{ replay_url }}">
+                <input type="hidden" name="replay_vals"   value='{{ replay_vals | tojson }}'>
+                <input type="hidden" name="olympiad_id"   value="{{ olympiad_id }}">
+            {% else %}
+                <input type="hidden" name="params" value='{{ params | tojson }}'>
+            {% endif %}
             <input type="hidden" name="pin" id="pin-hidden" value="{{ pin | default('') }}">
             <div class="pin-input-container">
                 <input type="text" inputmode="numeric" maxlength="1" class="pin-digit" autofocus>

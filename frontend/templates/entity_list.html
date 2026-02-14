@@ -1,4 +1,4 @@
-<form class="entity-form" hx-post="/api/{{ entities }}" hx-target="#main-content">
+<form class="entity-form" autocomplete="off" hx-post="/api/{{ entities }}" hx-target="#main-content">
     <input type="text" name="name" placeholder="{{ placeholder }}" required>
     <button type="submit">+</button>
 </form>

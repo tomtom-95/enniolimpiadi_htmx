@@ -1,0 +1,39 @@
+<div id="modal" _="on closeEventModal from body remove me">
+	<div class="modal-underlay" _="on click trigger closeEventModal on body"></div>
+    <div class="modal-content event-modal" _="on click halt the event's bubbling">
+        <h3>{{ name }}</h3>
+
+        <div class="form-section">
+            <label class="modal-section-label">Tipo di punteggio</label>
+            {% include "score_kind.html" %}
+        </div>
+
+        <div class="form-section">
+            <label class="modal-section-label">Partecipanti</label>
+            <div id="modal-players-section">
+                {% include "event_modal_players.html" %}
+            </div>
+        </div>
+
+        <div class="form-section">
+            <label class="modal-section-label">Fasi del torneo</label>
+            <div id="modal-stages-section">
+                {% include "event_modal_stages.html" %}
+            </div>
+        </div>
+
+        <div class="modal-actions">
+            <button type="button" class="btn-cancel"
+                hx-delete="/api/events/{{ event_id }}/cancel"
+                hx-target="#modal-container" hx-swap="innerHTML">
+                Annulla
+            </button>
+            <button type="button" class="btn-submit"
+                hx-get="/api/events"
+                hx-target="#main-content"
+                _="on click trigger closeEventModal on body">
+                Conferma
+            </button>
+        </div>
+    </div>
+</div>

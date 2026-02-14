@@ -24,6 +24,11 @@ schema_path = Path(os.environ["SCHEMA_PATH"])
 root = Path(os.environ["PROJECT_ROOT"])
 templates = Jinja2Templates(directory=root / "frontend" / "templates")
 
+SCORE_KINDS = [
+    {"kind": "points", "label": "Punti"},
+    {"kind": "outcome", "label": "Vittoria / Sconfitta"},
+]
+
 entity_list_form_placeholder = {
     "olympiads": "Aggiungi una nuova olimpiade",
     "players": "Aggiungi un nuovo giocatore",
@@ -244,8 +249,9 @@ def diagnose_entity_noop(
     olympiad_id: int,
     session_id: str,
     conn,
-    action_type: str,
-    action_params: dict
+    replay_method: str,
+    replay_url: str,
+    replay_vals: dict,
 ) -> Response:
     """
     Diagnose why an entity operation was a no-op.
@@ -306,9 +312,10 @@ def diagnose_entity_noop(
     response = templates.TemplateResponse(
         request, "pin_modal.html", {
             "action": "/api/validate_pin",
-            "action_type": action_type,
+            "replay_method": replay_method,
+            "replay_url": replay_url,
+            "replay_vals": replay_vals,
             "olympiad_id": olympiad_id,
-            "params": action_params
         }
     )
     response.headers["HX-Retarget"] = "#modal-container"
@@ -322,9 +329,9 @@ def diagnose_olympiad_noop(
     expected_version: int,
     session_id: str,
     session_data,
-    conn,
-    action_type: str,
-    action_params: dict
+    replay_method: str,
+    replay_url: str,
+    replay_vals: dict,
 ) -> Response:
     """
     Diagnose why an olympiad operation was a no-op and return appropriate response.
@@ -332,6 +339,8 @@ def diagnose_olympiad_noop(
     Called after a conditional UPDATE/DELETE returned no rows.
     Checks: deleted, version mismatch, or not authorized.
     """
+    conn = request.state.conn
+
     diag = conn.execute(
         """
         SELECT
@@ -386,9 +395,10 @@ def diagnose_olympiad_noop(
     response = templates.TemplateResponse(
         request, "pin_modal.html", {
             "action": "/api/validate_pin",
-            "action_type": action_type,
+            "replay_method": replay_method,
+            "replay_url": replay_url,
+            "replay_vals": replay_vals,
             "olympiad_id": olympiad_id,
-            "params": action_params
         }
     )
     response.headers["HX-Retarget"] = "#modal-container"
@@ -513,39 +523,28 @@ def list_olympiads(request: Request):
 
     cursor = conn.execute("SELECT id, name, version FROM olympiads")
     rows = [{"id": row["id"], "name": row["name"], "version": row["version"]} for row in cursor.fetchall()]
-    placeholder = entity_list_form_placeholder["olympiads"]
     return templates.TemplateResponse(
-        request, "entity_list.html",
-        {"entities": "olympiads", "placeholder": placeholder, "items": rows}
+        request, "olympiad_list.html",
+        {"items": rows}
+    )
+
+
+@app.get("/api/olympiads/create")
+def get_create_olympiad_modal(request: Request, name: str = Query(...)):
+    return templates.TemplateResponse(
+        request, "pin_modal.html", {
+            "action": "/api/olympiads",
+            "params": {"name": name},
+        }
     )
 
 
 @app.post("/api/olympiads")
-def create_olympiad(
-    request: Request,
-    name: str = Form(None),
-    pin: str = Form(None),
-    params: str = Form(None),
-):
+def create_olympiad(request: Request, pin: str = Form(...), params: str = Form(...)):
     conn = request.state.conn
 
-    # If params provided (from modal resubmit), extract name from it
-    if params:
-        params_dict = json.loads(params)
-        name = params_dict.get("name", name)
+    name = json.loads(params)["name"]
 
-    # First call (no PIN): show PIN modal
-    if pin is None:
-        response = templates.TemplateResponse(
-            request, "pin_modal.html", {
-                "action": "/api/olympiads",
-                "params": {"name": name},
-            }
-        )
-        response.headers["HX-Retarget"] = "#modal-container"
-        return response
-
-    # PIN provided but invalid
     if len(pin) != 4:
         response = templates.TemplateResponse(
             request, "pin_modal.html", {
@@ -555,6 +554,7 @@ def create_olympiad(
             }
         )
         response.headers["HX-Retarget"] = "#modal-container"
+        response.headers["HX-Reswap"] = "innerHTML"
         return response
 
     try:
@@ -586,7 +586,7 @@ def create_olympiad(
         )
     )
     response.headers["HX-Retarget"] = "#entity-list"
-    response.headers["HX-Reswap"] = "beforeend"
+    response.headers["HX-Reswap"] = "afterbegin"
     return response
 
 
@@ -681,8 +681,10 @@ def rename_olympiad(
 
     # Update was a no-op - diagnose why
     return diagnose_olympiad_noop(
-        request, olympiad_id, olympiad_version, session_id, session_data, conn,
-        "rename_olympiad", {"name": name, "version": olympiad_version}
+        request, olympiad_id, olympiad_version, session_id, session_data,
+        replay_method="put",
+        replay_url=f"/api/olympiads/{olympiad_id}",
+        replay_vals={"name": name, "version": olympiad_version},
     )
 
 
@@ -728,8 +730,10 @@ def delete_olympiad(
 
     # Delete was a no-op - diagnose why
     return diagnose_olympiad_noop(
-        request, olympiad_id, olympiad_version, session_id, session_data, conn,
-        "delete_olympiad", {"version": olympiad_version}
+        request, olympiad_id, olympiad_version, session_id, session_data,
+        replay_method="delete",
+        replay_url=f"/api/olympiads/{olympiad_id}?version={olympiad_version}",
+        replay_vals={},
     )
 
 
@@ -784,7 +788,9 @@ def select_event(
     else:
         return diagnose_entity_noop(
             request, "events", event_id, event_version, olympiad_id, session_id, conn,
-            "", {}
+            replay_method="get",
+            replay_url=f"/api/events/{event_id}?version={event_version}",
+            replay_vals={},
         )
 
 
@@ -1082,6 +1088,92 @@ def _cancel_edit(request: Request, entities: str, item_id: int, version: int, na
     )
 
 
+def _create_entity(request: Request, entities: str, name: str):
+    conn = request.state.conn
+    session_id = request.state.session_id
+    session_data = get_session_data(conn, session_id)
+    olympiad_id = session_data["selected_olympiad_id"]
+
+    if olympiad_id is None:
+        return templates.TemplateResponse(
+            request, "select_olympiad_required.html",
+            {"message": select_olympiad_message[entities]}
+        )
+
+    if entities == "events":
+        insert_sql = f"""
+            INSERT INTO {entities} (name, olympiad_id, score_kind)
+            SELECT ?, ?, 'points'
+            WHERE EXISTS (
+                SELECT 1 FROM session_olympiad_auth
+                WHERE session_id = ? AND olympiad_id = ?
+            )
+            RETURNING id, name, version
+            """
+    else:
+        insert_sql = f"""
+            INSERT INTO {entities} (name, olympiad_id)
+            SELECT ?, ?
+            WHERE EXISTS (
+                SELECT 1 FROM session_olympiad_auth
+                WHERE session_id = ? AND olympiad_id = ?
+            )
+            RETURNING id, name, version
+            """
+
+    try:
+        inserted_row = conn.execute(
+            insert_sql,
+            (name, olympiad_id, session_id, olympiad_id)
+        ).fetchone()
+    except sqlite3.IntegrityError:
+        response = HTMLResponse(templates.get_template("entity_name_duplicate.html").render())
+        response.headers["HX-Retarget"] = "#modal-container"
+        response.headers["HX-Reswap"] = "innerHTML"
+        return response
+
+    if inserted_row:
+        conn.commit()
+        item = {"id": inserted_row["id"], "name": inserted_row["name"], "version": inserted_row["version"]}
+        html_content = templates.get_template("entity_element.html").render(
+            item=item, entities=entities, hx_target="#main-content"
+        )
+        response = HTMLResponse(html_content)
+        response.headers["HX-Retarget"] = "#entity-list"
+        response.headers["HX-Reswap"] = "afterbegin"
+        return response
+
+    # INSERT was a no-op — check if olympiad was deleted or we need auth
+    olympiad_exists = conn.execute(
+        "SELECT id FROM olympiads WHERE id = ?", (olympiad_id,)
+    ).fetchone()
+
+    if not olympiad_exists:
+        conn.execute(
+            "UPDATE sessions SET selected_olympiad_id = NULL, selected_olympiad_version = NULL WHERE id = ?",
+            (session_id,)
+        )
+        conn.commit()
+        response = templates.TemplateResponse(request, "olympiad_not_found.html")
+        response.headers["HX-Retarget"] = "#main-content"
+        response.headers["HX-Reswap"] = "innerHTML"
+        trigger_badge_update(response)
+        return response
+
+    # Not authorized — show PIN modal
+    response = templates.TemplateResponse(
+        request, "pin_modal.html", {
+            "action": "/api/validate_pin",
+            "replay_method": "post",
+            "replay_url": f"/api/{entities}",
+            "replay_vals": {"name": name},
+            "olympiad_id": olympiad_id,
+        }
+    )
+    response.headers["HX-Retarget"] = "#modal-container"
+    response.headers["HX-Reswap"] = "innerHTML"
+    return response
+
 def _rename_entity(request: Request, entities: str, entity_id: int, name: str, entity_version: int, conn):
     session_id = request.state.session_id
     session_data = get_session_data(conn, session_id)
@@ -1122,8 +1214,9 @@ def _rename_entity(request: Request, entities: str, entity_id: int, name: str, e
 
     return diagnose_entity_noop(
         request, entities, entity_id, entity_version, olympiad_id, session_id, conn,
-        f"rename_{entities}",
-        {"entity_id": entity_id, "name": name, "version": entity_version, "entities": entities}
+        replay_method="put",
+        replay_url=f"/api/{entities}/{entity_id}",
+        replay_vals={"name": name, "version": entity_version},
     )
 
 
@@ -1157,8 +1250,9 @@ def _delete_entity(request: Request, entities: str, entity_id: int, entity_versi
 
     return diagnose_entity_noop(
         request, entities, entity_id, entity_version, olympiad_id, session_id, conn,
-        f"delete_{entities}",
-        {"entity_id": entity_id, "version": entity_version, "entities": entities}
+        replay_method="delete",
+        replay_url=f"/api/{entities}/{entity_id}?version={entity_version}",
+        replay_vals={},
     )
 
 
@@ -1177,6 +1271,351 @@ def list_teams(request: Request):
 @app.get("/api/events")
 def list_events(request: Request):
     return _list_entities(request, "events", request.state.conn)
+
+@app.post("/api/players")
+def create_player(request: Request, name: str = Form(...)):
+    return _create_entity(request, "players", name)
+
+@app.post("/api/teams")
+def create_team(request: Request, name: str = Form(...)):
+    return _create_entity(request, "teams", name)
+
+
+def _render_event_modal(request, conn, event_id, name, olympiad_id):
+    """Render the live-editing event modal with all sections."""
+    stage_kinds = conn.execute(
+        "SELECT kind, label FROM stage_kinds ORDER BY kind"
+    ).fetchall()
+
+    # Current stages for this event
+    stages = conn.execute(
+        "SELECT es.id, es.stage_order, es.kind, sk.label "
+        "FROM event_stages es JOIN stage_kinds sk ON sk.kind = es.kind "
+        "WHERE es.event_id = ? ORDER BY es.stage_order",
+        (event_id,)
+    ).fetchall()
+
+    # Current score kind
+    current_score_kind = conn.execute(
+        "SELECT score_kind FROM events WHERE id = ?", (event_id,)
+    ).fetchone()["score_kind"]
+
+    # Enrolled participants
+    enrolled = conn.execute(
+        """
+        SELECT ep.participant_id, COALESCE(pl.name, t.name) AS name
+        FROM event_participants ep
+        JOIN participants p ON p.id = ep.participant_id
+        LEFT JOIN players pl ON pl.id = p.player_id
+        LEFT JOIN teams t ON t.id = p.team_id
+        WHERE ep.event_id = ?
+        ORDER BY name
+        """,
+        (event_id,)
+    ).fetchall()
+    enrolled_ids = {r["participant_id"] for r in enrolled}
+
+    # Available participants (not yet enrolled)
+    all_participants = conn.execute(
+        """
+        SELECT p.id, COALESCE(pl.name, t.name) AS name
+        FROM participants p
+        LEFT JOIN players pl ON pl.id = p.player_id
+        LEFT JOIN teams t ON t.id = p.team_id
+        WHERE COALESCE(pl.olympiad_id, t.olympiad_id) = ?
+        ORDER BY name
+        """,
+        (olympiad_id,)
+    ).fetchall()
+    available = [p for p in all_participants if p["id"] not in enrolled_ids]
+
+    response = templates.TemplateResponse(
+        request, "event_modal.html", {
+            "event_id": event_id,
+            "name": name,
+            "score_kinds": SCORE_KINDS,
+            "current_score_kind": current_score_kind,
+            "stage_kinds": stage_kinds,
+            "stages": stages,
+            "enrolled": enrolled,
+            "available": available,
+        }
+    )
+    response.headers["HX-Retarget"] = "#modal-container"
+    response.headers["HX-Reswap"] = "innerHTML"
+    return response
+
+
+def _create_event(request, name: str):
+    """Insert event into DB immediately, then render the live-editing modal."""
+    conn = request.state.conn
+    session_id = request.state.session_id
+    session_data = get_session_data(conn, session_id)
+    olympiad_id = session_data["selected_olympiad_id"]
+
+    try:
+        row = conn.execute(
+            "INSERT INTO events (name, olympiad_id, score_kind) VALUES (?, ?, 'points') RETURNING id, name, version",
+            (name, olympiad_id)
+        ).fetchone()
+    except sqlite3.IntegrityError:
+        response = HTMLResponse(templates.get_template("entity_name_duplicate.html").render())
+        response.headers["HX-Retarget"] = "#modal-container"
+        response.headers["HX-Reswap"] = "innerHTML"
+        return response
+
+    event_id = row["id"]
+    conn.commit()
+
+    # Build OOB element to add event to the entity list
+    item = {"id": row["id"], "name": row["name"], "version": row["version"]}
+    oob_html = templates.get_template("entity_element.html").render(
+        item=item, entities="events", hx_target="#main-content"
+    )
+
+    # Render modal
+    modal_response = _render_event_modal(request, conn, event_id, name, olympiad_id)
+
+    # Combine: modal content + OOB entity element
+    modal_body = modal_response.body.decode()
+    combined = modal_body + f'<div id="entity-list" hx-swap-oob="afterbegin">{oob_html}</div>'
+    response = HTMLResponse(combined)
+    response.headers["HX-Retarget"] = "#modal-container"
+    response.headers["HX-Reswap"] = "innerHTML"
+    return response
+
+
+@app.post("/api/events")
+def create_event(request: Request, name: str = Form(...)):
+    conn = request.state.conn
+    session_id = request.state.session_id
+    session_data = get_session_data(conn, session_id)
+
+    row = conn.execute(
+        "SELECT olympiad_id FROM session_olympiad_auth WHERE session_id = ? AND olympiad_id = ?",
+        (session_id, session_data["selected_olympiad_id"])
+    ).fetchone()
+    if row:
+        return _create_event(request, name=name)
+    else:
+        olympiad = conn.execute(
+            "SELECT id FROM olympiads WHERE id = ?",
+            (session_data["selected_olympiad_id"],)
+        ).fetchone()
+        if olympiad:
+            response = templates.TemplateResponse(
+                request, "pin_modal.html", {
+                    "action": "/api/validate_pin",
+                    "replay_method": "post",
+                    "replay_url": "/api/events",
+                    "replay_vals": {"name": name},
+                    "olympiad_id": olympiad["id"],
+                }
+            )
+            response.headers["HX-Retarget"] = "#modal-container"
+            response.headers["HX-Reswap"] = "innerHTML"
+            return response
+        else:
+            return templates.TemplateResponse(request, "olympiad_not_found.html")
+
+
+# ---------------------------------------------------------------------------
+# Event modal live-editing endpoints
+# ---------------------------------------------------------------------------
+
+@app.put("/api/events/{event_id}/score-kind")
+def update_event_score_kind(
+    request: Request,
+    event_id: int,
+    score_kind: str = Form(...),
+):
+    conn = request.state.conn
+    conn.execute(
+        "UPDATE events SET score_kind = ? WHERE id = ?",
+        (score_kind, event_id)
+    )
+    conn.commit()
+
+    return templates.TemplateResponse(
+        request, "score_kind.html", {
+            "event_id": event_id,
+            "score_kinds": SCORE_KINDS,
+            "current_score_kind": score_kind,
+        }
+    )
+
+
+@app.post("/api/events/{event_id}/stages")
+def add_event_stage(
+    request: Request,
+    event_id: int,
+    kind: str = Form(...),
+):
+    conn = request.state.conn
+
+    max_order = conn.execute(
+        "SELECT COALESCE(MAX(stage_order), 0) AS m FROM event_stages WHERE event_id = ?",
+        (event_id,)
+    ).fetchone()["m"]
+
+    conn.execute(
+        "INSERT INTO event_stages (event_id, kind, stage_order) VALUES (?, ?, ?)",
+        (event_id, kind, max_order + 1)
+    )
+    conn.commit()
+
+    return _render_stages_section(request, conn, event_id)
+
+
+@app.delete("/api/events/{event_id}/stages/{stage_id}")
+def remove_event_stage(
+    request: Request,
+    event_id: int,
+    stage_id: int,
+):
+    conn = request.state.conn
+    conn.execute("DELETE FROM event_stages WHERE id = ? AND event_id = ?", (stage_id, event_id))
+
+    # Re-sequence remaining stages
+    remaining = conn.execute(
+        "SELECT id FROM event_stages WHERE event_id = ? ORDER BY stage_order",
+        (event_id,)
+    ).fetchall()
+    for i, row in enumerate(remaining):
+        conn.execute(
+            "UPDATE event_stages SET stage_order = ? WHERE id = ?",
+            (i + 1, row["id"])
+        )
+    conn.commit()
+
+    return _render_stages_section(request, conn, event_id)
+
+
+def _render_stages_section(request, conn, event_id):
+    """Re-render the stages section of the event modal."""
+    stage_kinds = conn.execute(
+        "SELECT kind, label FROM stage_kinds ORDER BY kind"
+    ).fetchall()
+
+    stages = conn.execute(
+        "SELECT es.id, es.stage_order, es.kind, sk.label "
+        "FROM event_stages es JOIN stage_kinds sk ON sk.kind = es.kind "
+        "WHERE es.event_id = ? ORDER BY es.stage_order",
+        (event_id,)
+    ).fetchall()
+
+    return templates.TemplateResponse(
+        request, "event_modal_stages.html", {
+            "event_id": event_id,
+            "stage_kinds": stage_kinds,
+            "stages": stages,
+        }
+    )
+
+
+@app.post("/api/events/{event_id}/enroll/{participant_id}")
+def enroll_participant(
+    request: Request,
+    event_id: int,
+    participant_id: int,
+):
+    conn = request.state.conn
+    conn.execute(
+        "INSERT OR IGNORE INTO event_participants (event_id, participant_id) VALUES (?, ?)",
+        (event_id, participant_id)
+    )
+    conn.commit()
+
+    # TODO: participant must also be inserted in match_participants
+
+    # When a player is enrolled into the event it must also be enrolled in the first stage
+    # of the event, but at the time enroll_participant runs a first stage might not be
+    # created
+    # the strategy must be: when a stage is created, the participants of the event
+    # gets distributed in the event stage. The way they are distributed depends on
+    # the kind of tournament
+    # What happens when a player is deleted? Its record gets automatically eliminated by each match
+    # but that is not enough: the matches in each groups that had this players must be rearrenged
+    # the easiest way is to make a deletion of all the records in match_participants table for all the
+    # participants of that event and rerun a function that automatically does the right thing when
+    # creating matches
+
+
+    return _render_players_section(request, conn, event_id)
+
+
+@app.delete("/api/events/{event_id}/enroll/{participant_id}")
+def unenroll_participant(
+    request: Request,
+    event_id: int,
+    participant_id: int,
+):
+    conn = request.state.conn
+    conn.execute(
+        "DELETE FROM event_participants WHERE event_id = ? AND participant_id = ?",
+        (event_id, participant_id)
+    )
+    conn.commit()
+
+    return _render_players_section(request, conn, event_id)
+
+
+def _render_players_section(request, conn, event_id):
+    """Re-render the players section of the event modal."""
+    session_id = request.state.session_id
+    session_data = get_session_data(conn, session_id)
+    olympiad_id = session_data["selected_olympiad_id"]
+
+    enrolled = conn.execute(
+        """
+        SELECT ep.participant_id, COALESCE(pl.name, t.name) AS name
+        FROM event_participants ep
+        JOIN participants p ON p.id = ep.participant_id
+        LEFT JOIN players pl ON pl.id = p.player_id
+        LEFT JOIN teams t ON t.id = p.team_id
+        WHERE ep.event_id = ?
+        ORDER BY name
+        """,
+        (event_id,)
+    ).fetchall()
+    enrolled_ids = {r["participant_id"] for r in enrolled}
+
+    all_participants = conn.execute(
+        """
+        SELECT p.id, COALESCE(pl.name, t.name) AS name
+        FROM participants p
+        LEFT JOIN players pl ON pl.id = p.player_id
+        LEFT JOIN teams t ON t.id = p.team_id
+        WHERE COALESCE(pl.olympiad_id, t.olympiad_id) = ?
+        ORDER BY name
+        """,
+        (olympiad_id,)
+    ).fetchall()
+    available = [p for p in all_participants if p["id"] not in enrolled_ids]
+
+    return templates.TemplateResponse(
+        request, "event_modal_players.html", {
+            "event_id": event_id,
+            "enrolled": enrolled,
+            "available": available,
+        }
+    )
+
+
+@app.delete("/api/events/{event_id}/cancel")
+def cancel_event(
+    request: Request,
+    event_id: int,
+):
+    conn = request.state.conn
+    conn.execute("DELETE FROM events WHERE id = ?", (event_id,))
+    conn.commit()
+
+    html_content = (
+        '<div id="modal-container"></div>'
+        f'<div id="events-{event_id}" hx-swap-oob="delete"></div>'
+    )
+    return HTMLResponse(html_content)
 
 
 @app.get("/api/olympiads/{item_id}/edit")
@@ -1247,13 +1686,14 @@ def delete_events(request: Request, entity_id: int, entity_version: int = Query(
 def validate_pin(
     request: Request,
     pin: str = Form(...),
-    action_type: str = Form(...),
     olympiad_id: int = Form(...),
-    params: str = Form("{}"),
+    replay_method: str = Form(...),
+    replay_url: str = Form(...),
+    replay_vals: str = Form("{}"),
 ):
     conn = request.state.conn
     session_id = request.state.session_id
-    parsed_params = json.loads(params)
+    parsed_vals = json.loads(replay_vals)
 
     # Try conditional insert - only succeeds if PIN is correct
     inserted = conn.execute(
@@ -1269,9 +1709,18 @@ def validate_pin(
     ).fetchone()
 
     if inserted:
-        # PIN correct, auth granted - call the actual endpoint function
+        # PIN correct, auth granted - replay the original request
         conn.commit()
-        return _dispatch_action(request, action_type, olympiad_id, parsed_params)
+        response = templates.TemplateResponse(
+            request, "replay_trigger.html", {
+                "replay_method": replay_method,
+                "replay_url": replay_url,
+                "replay_vals": parsed_vals,
+            }
+        )
+        response.headers["HX-Retarget"] = "#modal-container"
+        response.headers["HX-Reswap"] = "innerHTML"
+        return response
 
     # No insert - diagnose why
     diag = conn.execute(
@@ -1292,9 +1741,10 @@ def validate_pin(
         response = templates.TemplateResponse(
             request, "pin_modal.html", {
                 "action": "/api/validate_pin",
-                "action_type": action_type,
+                "replay_method": replay_method,
+                "replay_url": replay_url,
+                "replay_vals": parsed_vals,
                 "olympiad_id": olympiad_id,
-                "params": parsed_params,
                 "error": "PIN errato"
             }
         )
@@ -1302,39 +1752,16 @@ def validate_pin(
         response.headers["HX-Reswap"] = "innerHTML"
         return response
 
-    # Olympiad doesn't exist - call endpoint anyway, it will handle the deleted case
-    return _dispatch_action(request, action_type, olympiad_id, parsed_params)
-
-
-def _dispatch_action(request: Request, action_type: str, olympiad_id: int, params: dict):
-    """Dispatch to the actual endpoint function after PIN validation."""
-    conn = request.state.conn
-    if action_type == "rename_olympiad":
-        response = rename_olympiad(
-            request, olympiad_id, name=params["name"],
-            olympiad_version=params["version"]
-        )
-    elif action_type == "delete_olympiad":
-        response = delete_olympiad(
-            request, olympiad_id, olympiad_version=params["version"]
-        )
-    elif action_type == "delete_players" or action_type == "delete_teams" or action_type == "delete_events":
-        entities = params["entities"]
-        response = _delete_entity(
-            request, entities, params["entity_id"],
-            entity_version=params["version"], conn=conn
-        )
-    elif action_type == "rename_players" or action_type == "rename_teams" or action_type == "rename_events":
-        entities = params["entities"]
-        response = _rename_entity(
-            request, entities, params["entity_id"],
-            name=params["name"], entity_version=params["version"], conn=conn
-        )
-    else:
-        response = HTMLResponse("")
-        response.headers["HX-Reswap"] = "none"
-
-    response.headers["HX-Trigger-After-Settle"] = "closeModal"
+    # Olympiad deleted or already authorized - replay and let endpoint handle it
+    response = templates.TemplateResponse(
+        request, "replay_trigger.html", {
+            "replay_method": replay_method,
+            "replay_url": replay_url,
+            "replay_vals": parsed_vals,
+        }
+    )
+    response.headers["HX-Retarget"] = "#modal-container"
+    response.headers["HX-Reswap"] = "innerHTML"
     return response
 
 
