@@ -14,7 +14,7 @@ CREATE TABLE events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     olympiad_id INTEGER NOT NULL REFERENCES olympiads(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
-    current_stage_order INTEGER, -- 0=registration, 1..N=started, >max=finished
+    current_stage_order INTEGER NOT NULL DEFAULT 0, -- 0=registration, 1..N=started, >max=finished
     score_kind TEXT NOT NULL CHECK(score_kind IN ('points', 'outcome')),
     version INTEGER NOT NULL DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,

@@ -3,7 +3,6 @@ import html
 import json
 import secrets
 
-from itertools import combinations
 from contextlib import asynccontextmanager
 from collections import defaultdict, deque
 
@@ -16,6 +15,7 @@ from fastapi.templating import Jinja2Templates
 from pathlib import Path
 
 from . import database
+from . import events
 
 
 db_path = Path(os.environ["DATABASE_PATH"])
@@ -43,7 +43,7 @@ select_olympiad_message = {
 }
 
 
-def build_single_elimination_stage(conn, stage_id, stage_label):
+def build_single_elimination_stage(conn, stage_id):
     """Build a single-elimination stage dict from DB data."""
 
     # Load all bracket matches for this stage
@@ -57,7 +57,7 @@ def build_single_elimination_stage(conn, stage_id, stage_label):
     ).fetchall()
 
     if not rows:
-        return {"name": stage_label, "rounds": [], "id": stage_id}
+        return { "rounds": [], "id": stage_id }
 
     # Load participants for all these matches
     match_ids = [r["match_id"] for r in rows]
@@ -134,9 +134,7 @@ def build_single_elimination_stage(conn, stage_id, stage_label):
 
         rounds_list.append({"matches": match_dicts})
 
-    res = {
-        "name": stage_label, "rounds": rounds_list, "id": stage_id
-    }
+    res = { "rounds": rounds_list, "id": stage_id }
 
     return res
 
@@ -155,7 +153,7 @@ def derive_event_status(current_stage_order, max_stage_order):
     return "started"
 
 
-def build_groups_stage(conn, stage_id: int, stage_label):
+def build_groups_stage(conn, stage_id: int):
     """Build and render a groups stage for display."""
 
     # Build groups data
@@ -219,7 +217,6 @@ def build_groups_stage(conn, stage_id: int, stage_label):
     total_participants = sum(len(g["participants"]) for g in groups)
 
     stage = {
-        "name": stage_label,
         "groups": groups,
         "id": stage_id,
         "total_participants": total_participants
@@ -795,16 +792,13 @@ def select_event(
 
 
 @app.get("/api/events/{event_id}/players")
-def get_event_players(
-    request: Request,
-    event_id: int,
-):
+def get_event_players(request: Request, event_id: int):
     conn = request.state.conn
     session_id = request.state.session_id
     session_data = get_session_data(conn, session_id)
     olympiad_id = session_data["selected_olympiad_id"]
 
-    enrolled_players = conn.execute(
+    enrolled_participants = conn.execute(
         """
         SELECT DISTINCT p.id, COALESCE(pl.name, t.name) AS name
         FROM participants p
@@ -818,7 +812,7 @@ def get_event_players(
         """,
         (event_id,)
     ).fetchall()
-    enrolled_participant_ids = {p["id"] for p in enrolled_players}
+    enrolled_ids = {p["id"] for p in enrolled_participants}
 
     all_participants = conn.execute(
         """
@@ -831,24 +825,20 @@ def get_event_players(
         """,
         (olympiad_id,)
     ).fetchall()
-    available_players = [p for p in all_participants if p["id"] not in enrolled_participant_ids]
+    available_participants = [p for p in all_participants if p["id"] not in enrolled_ids]
 
     return templates.TemplateResponse(
-        request, "event_players_section.html",
+        request, "event_players_section_v2.html",
         {
-            "enrolled_players": enrolled_players,
-            "available_players": available_players,
+            "enrolled_participants": enrolled_participants,
+            "available_participants": available_participants,
             "event_id": event_id,
         }
     )
 
 
 @app.get("/api/events/{event_id}/stage/{stage_order}")
-def get_event_stage(
-    request: Request,
-    event_id: int,
-    stage_order: int,
-):
+def get_event_stage(request: Request, event_id: int, stage_order: int):
     conn = request.state.conn
     row = conn.execute(
         """
@@ -857,7 +847,7 @@ def get_event_stage(
             es.id,
             es.stage_order,
             es.kind,
-            sk.label AS name
+            sk.label
         FROM events e
         LEFT JOIN event_stages es ON es.event_id = e.id AND es.stage_order = ?
         LEFT JOIN stage_kinds sk ON sk.kind = es.kind
@@ -871,7 +861,7 @@ def get_event_stage(
 
     stage_id    = row["id"]
     stage_kind  = row["kind"]
-    stage_label = row["name"]
+    stage_label = row["label"]
 
     # Get total number of stages for navigation
     total_stages = conn.execute(
@@ -880,11 +870,13 @@ def get_event_stage(
     ).fetchone()["count"]
 
     if stage_kind == "groups":
-        stage = build_groups_stage(conn, stage_id, stage_label)
+        stage = build_groups_stage(conn, stage_id)
     elif stage_kind == "round_robin":
         return HTMLResponse("<div class='error-banner'>Fase non trovata</div>")
     elif stage_kind == "single_elimination":
-        stage = build_single_elimination_stage(conn, stage_id, stage_label)
+        stage = build_single_elimination_stage(conn, stage_id)
+
+    stage["name"] = stage_label
 
     response = templates.TemplateResponse(
         request, "event_stage.html",
@@ -912,7 +904,7 @@ def resize_stage_groups(
     event_row = conn.execute(
         "SELECT current_stage_order FROM events WHERE id = ?", (event_id,)
     ).fetchone()
-    if not event_row or event_row["current_stage_order"] is not None:
+    if not event_row or event_row["current_stage_order"] != 0:
         return HTMLResponse("<div class='error-banner'>Resize consentito solo durante la registrazione</div>")
 
     stage_row = conn.execute(
@@ -922,61 +914,19 @@ def resize_stage_groups(
     if not stage_row or stage_row["kind"] not in ("groups", "round_robin"):
         return HTMLResponse("<div class='error-banner'>Fase non trovata o già iniziata</div>")
 
-    participant_rows = conn.execute(
-        "SELECT DISTINCT gp.participant_id "
-        "FROM group_participants gp "
-        "JOIN groups g ON g.id = gp.group_id "
-        "WHERE g.event_stage_id = ? "
-        "ORDER BY gp.participant_id",
-        (stage_id,)
-    ).fetchall()
-    participant_ids = [r["participant_id"] for r in participant_rows]
-    total = len(participant_ids)
+    total = conn.execute(
+        "SELECT COUNT(*) as c FROM event_participants WHERE event_id = ?",
+        (event_id,)
+    ).fetchone()["c"]
 
     if total < 2:
         return HTMLResponse("<div class='error-banner'>Servono almeno 2 partecipanti</div>")
 
-    num_groups = max(1, min(num_groups, total // 2))
-
-    # Teardown: CASCADE handles group_participants, matches, match_participants, scores
-    conn.execute("DELETE FROM groups WHERE event_stage_id = ?", (stage_id,))
-
-    # Rebuild groups
-    buckets = [[] for _ in range(num_groups)]
-    for i, pid in enumerate(participant_ids):
-        buckets[i % num_groups].append(pid)
-
-    for bucket in buckets:
-        grow = conn.execute(
-            "INSERT INTO groups (event_stage_id) VALUES (?) RETURNING id",
-            (stage_id,)
-        ).fetchone()
-        gid = grow["id"]
-
-        for seed, pid in enumerate(bucket):
-            conn.execute(
-                "INSERT INTO group_participants (group_id, participant_id, seed) VALUES (?, ?, ?)",
-                (gid, pid, seed)
-            )
-
-        for p1, p2 in combinations(bucket, 2):
-            mrow = conn.execute(
-                "INSERT INTO matches (group_id) VALUES (?) RETURNING id",
-                (gid,)
-            ).fetchone()
-            conn.execute(
-                "INSERT INTO match_participants (match_id, participant_id) VALUES (?, ?)",
-                (mrow["id"], p1)
-            )
-            conn.execute(
-                "INSERT INTO match_participants (match_id, participant_id) VALUES (?, ?)",
-                (mrow["id"], p2)
-            )
-
+    events.construct_groups_stage(conn, stage_id, num_groups)
     conn.commit()
 
     # Re-render only the groups section
-    stage = build_groups_stage(conn, stage_id, "Tusorella")
+    stage = build_groups_stage(conn, stage_id)
 
     return templates.TemplateResponse(
         request, "stage_groups.html",
@@ -1127,7 +1077,7 @@ def _create_entity(request: Request, entities: str, name: str):
             (name, olympiad_id, session_id, olympiad_id)
         ).fetchone()
     except sqlite3.IntegrityError:
-        response = HTMLResponse(templates.get_template("entity_name_duplicate.html").render())
+        response = HTMLResponse(templates.get_template("entity_name_duplicate.html").render(entities=entities))
         response.headers["HX-Retarget"] = "#modal-container"
         response.headers["HX-Reswap"] = "innerHTML"
         return response
@@ -1196,7 +1146,7 @@ def _rename_entity(request: Request, entities: str, entity_id: int, name: str, e
             (name, entity_id, entity_version, olympiad_id, session_id, olympiad_id)
         ).fetchone()
     except sqlite3.IntegrityError:
-        response = HTMLResponse(templates.get_template("entity_name_duplicate.html").render())
+        response = HTMLResponse(templates.get_template("entity_name_duplicate.html").render(entities=entities))
         response.headers["HX-Retarget"] = "#modal-container"
         response.headers["HX-Reswap"] = "innerHTML"
         return response
@@ -1359,7 +1309,7 @@ def _create_event(request, name: str):
             (name, olympiad_id)
         ).fetchone()
     except sqlite3.IntegrityError:
-        response = HTMLResponse(templates.get_template("entity_name_duplicate.html").render())
+        response = HTMLResponse(templates.get_template("entity_name_duplicate.html").render(entities="events"))
         response.headers["HX-Retarget"] = "#modal-container"
         response.headers["HX-Reswap"] = "innerHTML"
         return response
@@ -1514,42 +1464,32 @@ def _render_stages_section(request, conn, event_id):
 
 
 @app.post("/api/events/{event_id}/enroll/{participant_id}")
-def enroll_participant(
-    request: Request,
-    event_id: int,
-    participant_id: int,
-):
+def enroll_participant(request: Request, event_id: int, participant_id: int):
     conn = request.state.conn
     conn.execute(
         "INSERT OR IGNORE INTO event_participants (event_id, participant_id) VALUES (?, ?)",
         (event_id, participant_id)
     )
+
+    first_stage = conn.execute(
+        "SELECT id, kind FROM event_stages WHERE event_stages.event_id = ? AND stage_order = 1",
+        (event_id,)
+    ).fetchone()
+    if first_stage:
+        stage_id   = first_stage["id"]
+        stage_kind = first_stage["kind"]
+        if stage_kind == "groups":
+            groups = conn.execute("SELECT id FROM groups WHERE event_stage_id = ?", (stage_id,)).fetchall()
+            events.construct_groups_stage(conn, stage_id, len(groups))
+        elif stage_kind == "single_elimination":
+            events.construct_single_elimination_stage(conn, stage_id)
+
     conn.commit()
-
-    # TODO: participant must also be inserted in match_participants
-
-    # When a player is enrolled into the event it must also be enrolled in the first stage
-    # of the event, but at the time enroll_participant runs a first stage might not be
-    # created
-    # the strategy must be: when a stage is created, the participants of the event
-    # gets distributed in the event stage. The way they are distributed depends on
-    # the kind of tournament
-    # What happens when a player is deleted? Its record gets automatically eliminated by each match
-    # but that is not enough: the matches in each groups that had this players must be rearrenged
-    # the easiest way is to make a deletion of all the records in match_participants table for all the
-    # participants of that event and rerun a function that automatically does the right thing when
-    # creating matches
-
-
     return _render_players_section(request, conn, event_id)
 
 
 @app.delete("/api/events/{event_id}/enroll/{participant_id}")
-def unenroll_participant(
-    request: Request,
-    event_id: int,
-    participant_id: int,
-):
+def unenroll_participant(request: Request, event_id: int, participant_id: int):
     conn = request.state.conn
     conn.execute(
         "DELETE FROM event_participants WHERE event_id = ? AND participant_id = ?",
@@ -1558,6 +1498,161 @@ def unenroll_participant(
     conn.commit()
 
     return _render_players_section(request, conn, event_id)
+
+@app.post("/api/events/{event_id}/enrollv2/{participant_id}")
+def enrollv2_participant(request: Request, event_id: int, participant_id: int):
+    conn = request.state.conn
+    session_id = request.state.session_id
+    session_data = get_session_data(conn, session_id)
+    olympiad_id = session_data["selected_olympiad_id"]
+
+    conn.execute(
+        "INSERT OR IGNORE INTO event_participants (event_id, participant_id) VALUES (?, ?)",
+        (event_id, participant_id)
+    )
+
+    current_stage_order = conn.execute(
+        "SELECT current_stage_order FROM events WHERE id = ?", (event_id,)
+    ).fetchone()["current_stage_order"]
+    assert current_stage_order == 0
+
+    first_stage = conn.execute(
+        "SELECT id, kind FROM event_stages WHERE event_id = ? AND stage_order = 1",
+        (event_id,)
+    ).fetchone()
+    if first_stage:
+        stage_id   = first_stage["id"]
+        stage_kind = first_stage["kind"]
+        if stage_kind == "groups":
+            groups = conn.execute("SELECT id FROM groups WHERE event_stage_id = ?", (stage_id,)).fetchall()
+            events.construct_groups_stage(conn, stage_id, len(groups))
+        elif stage_kind == "single_elimination":
+            events.construct_single_elimination_stage(conn, stage_id)
+
+    conn.commit()
+
+    event_enrolled_participants = conn.execute(
+        """
+        SELECT ep.participant_id AS id, COALESCE(pl.name, t.name) AS name
+        FROM event_participants ep
+        JOIN participants p ON p.id = ep.participant_id
+        LEFT JOIN players pl ON pl.id = p.player_id
+        LEFT JOIN teams t ON t.id = p.team_id
+        WHERE ep.event_id = ?
+        ORDER BY name
+        """,
+        (event_id,)
+    ).fetchall()
+    event_enrolled_ids = { p["id"] for p in event_enrolled_participants }
+
+    olympiad_enrolled_participants = conn.execute(
+        """
+        SELECT p.id, COALESCE(pl.name, t.name) AS name
+        FROM participants p
+        LEFT JOIN players pl ON pl.id = p.player_id
+        LEFT JOIN teams t ON t.id = p.team_id
+        JOIN events e ON e.olympiad_id = COALESCE(pl.olympiad_id, t.olympiad_id)
+        WHERE e.id = ?
+        ORDER BY name
+        """,
+        (event_id,)
+    ).fetchall()
+    event_available_participants = [
+        p for p in olympiad_enrolled_participants
+        if p["id"] not in event_enrolled_ids
+    ]
+
+    return templates.TemplateResponse(
+        request, "event_players_section_v2.html",
+        {
+            "enrolled_participants": event_enrolled_participants,
+            "available_participants": event_available_participants,
+            "event_id": event_id,
+        }
+    )
+
+
+@app.delete("/api/events/{event_id}/enrollv2/{participant_id}")
+def unenrollv2_participant(request: Request, event_id: int, participant_id: int):
+    conn = request.state.conn
+    session_id = request.state.session_id
+    session_data = get_session_data(conn, session_id)
+    olympiad_id = session_data["selected_olympiad_id"]
+
+    # the pipeline must be
+    #   delete the participants from the event: which means delete one row from event_participants
+    #   reconstruct the first stage 
+    #   the problem right now is that I am constructing stuff for the second stage
+    #   to solve this I can check event_id and allow unenroll only when current_stage_order is 0
+    #   meaning the event has no started yet
+    #   I must only put stuff on the first stage
+
+    conn.execute(
+        "DELETE FROM event_participants WHERE event_id = ? AND participant_id = ?",
+        (event_id, participant_id)
+    )
+
+    current_stage_order = conn.execute(
+        "SELECT current_stage_order FROM events WHERE id = ?", (event_id,)
+    ).fetchone()["current_stage_order"]
+    assert current_stage_order == 0
+
+    first_stage = conn.execute(
+        "SELECT id, kind FROM event_stages WHERE event_id = ? AND stage_order = 1",
+        (event_id,)
+    ).fetchone()
+    if first_stage:
+        stage_id   = first_stage["id"]
+        stage_kind = first_stage["kind"]
+        if stage_kind == "groups":
+            groups = conn.execute("SELECT id FROM groups WHERE event_stage_id = ?", (stage_id,)).fetchall()
+            events.construct_groups_stage(conn, stage_id, len(groups))
+        elif stage_kind == "single_elimination":
+            events.construct_single_elimination_stage(conn, stage_id)
+
+    conn.commit()
+
+    event_enrolled_participants = conn.execute(
+        """
+        SELECT ep.participant_id AS id, COALESCE(pl.name, t.name) AS name
+        FROM event_participants ep
+        JOIN participants p ON p.id = ep.participant_id
+        LEFT JOIN players pl ON pl.id = p.player_id
+        LEFT JOIN teams t ON t.id = p.team_id
+        WHERE ep.event_id = ?
+        ORDER BY name
+        """,
+        (event_id,)
+    ).fetchall()
+    event_enrolled_ids = { p["id"] for p in event_enrolled_participants }
+
+    olympiad_enrolled_participants = conn.execute(
+        """
+        SELECT p.id, COALESCE(pl.name, t.name) AS name
+        FROM participants p
+        LEFT JOIN players pl ON pl.id = p.player_id
+        LEFT JOIN teams t ON t.id = p.team_id
+        JOIN events e ON e.olympiad_id = COALESCE(pl.olympiad_id, t.olympiad_id)
+        WHERE e.id = ?
+        ORDER BY name
+        """,
+        (event_id,)
+    ).fetchall()
+    event_available_participants = [
+        p for p in olympiad_enrolled_participants
+        if p["id"] not in event_enrolled_ids
+    ]
+
+    response = templates.TemplateResponse(
+        request, "event_players_section_v2.html",
+        {
+            "enrolled_participants": event_enrolled_participants,
+            "available_participants": event_available_participants,
+            "event_id": event_id,
+        }
+    )
+
+    return response
 
 
 def _render_players_section(request, conn, event_id):

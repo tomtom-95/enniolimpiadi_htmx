@@ -1,25 +1,31 @@
-<button class="btn-add-player" _="on click toggle .hidden on #available-players-dropdown">
-    + Aggiungi Giocatore
-</button>
-<div id="available-players-dropdown" class="hidden">
-    {% include 'event_available_players.html' %}
-</div>
-<div id="enrolled-players-list">
-    {% if not enrolled_players %}
-        <p class="no-players-msg">Nessun giocatore iscritto</p>
+<div id="event-player-container" class="event-players-container">
+    <h4 class="event-section-label">Iscritti</h4>
+    {% if not enrolled_participants %}
+        <div class="no-players-msg">Nessun giocatore iscritto</div>
     {% else %}
-        {% for player in enrolled_players %}
-            <div id="enrolled-player-{{ player.id }}" class="entity-element">
-                <div class="item">{{ player.name }}</div>
-                <div class="item-icons">
-                    <button class="item-delete" aria-label="Rimuovi"
-                        hx-delete="/api/events/{{ event_id }}/players/{{ player.id }}"
-                        hx-target="#enrolled-player-{{ player.id }}"
-                        hx-trigger="click"
-                        hx-swap="outerHTML">
-                    </button>
+        <div class="enrolled-players-list">
+            {% for participant in enrolled_participants %}
+                <div id="enrolled-participant-{{ participant.id }}" class="event-player-item enrolled">
+                    <span>{{ participant.name }}</span>
+                    <button class="item-delete" aria-label="Rimuovi" hx-delete="/api/events/{{ event_id }}/enrollv2/{{ participant.id }}"
+                        hx-target="#event-player-container" hx-trigger="click" hx-swap="outerHTML"></button>
                 </div>
+            {% endfor %}
+        </div>
+    {% endif %}
+    {% if available_participants %}
+        <div class="event-player-list-section">
+            <h4 class="event-section-label">Disponibili</h4>
+            <div class="available-players-list">
+                {% for participant in available_participants %}
+                    <div class="event-player-item available">
+                        <span>{{ participant.name }}</span>
+                        <button class="btn-enroll" title="Iscrivi" hx-post="/api/events/{{ event_id }}/enroll/{{ participant.id }}">
+                            +
+                        </button>
+                    </div>
+                {% endfor %}
             </div>
-        {% endfor %}
+        </div>
     {% endif %}
 </div>

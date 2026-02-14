@@ -1,6 +1,7 @@
 import sqlite3
-from itertools import combinations
 from pathlib import Path
+
+from . import events
 
 def get_connection(db_path: Path) -> sqlite3.Connection:
     """Create a new database connection with foreign keys enabled."""
@@ -20,6 +21,7 @@ def init_db(db_path: Path, schema_path: Path):
         conn.commit()
     finally:
         conn.close()
+
 
 def seed_dummy_data(db_path: Path):
     """Fill the database with dummy olympiads, players, and events."""
@@ -77,7 +79,7 @@ def seed_dummy_data(db_path: Path):
         ]
         conn.executemany("INSERT INTO players (olympiad_id, name) VALUES (?, ?)", players)
 
-        events = [
+        _events = [
             (olympiad_id, "Event1" , "points"),
             (olympiad_id, "Event2" , "points"),
             (olympiad_id, "Event3" , "points"),
@@ -95,7 +97,7 @@ def seed_dummy_data(db_path: Path):
             (olympiad_id, "Event15", "points"),
             (olympiad_id, "Event16", "points")
         ]
-        conn.executemany("INSERT INTO events (olympiad_id, name, score_kind) VALUES (?, ?, ?)", events)
+        conn.executemany("INSERT INTO events (olympiad_id, name, score_kind) VALUES (?, ?, ?)", _events)
 
         # Create event stages
         conn.execute(
@@ -107,15 +109,6 @@ def seed_dummy_data(db_path: Path):
             (1, "single_elimination", 2)
         )
 
-        # Create first group of event_stage_id 1
-        conn.execute("INSERT INTO groups (event_stage_id) VALUES (?)", (1,))
-
-        # Create second group of event_stage_id 1
-        conn.execute("INSERT INTO groups (event_stage_id) VALUES (?)", (1,))
-
-        # Create first and only group of event_stage_id 2
-        conn.execute("INSERT INTO groups (event_stage_id) VALUES (?)", (2,))
-
         # Now I must create participants with team_id = NULL (they are just player)
         participants = [
             1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16
@@ -123,86 +116,12 @@ def seed_dummy_data(db_path: Path):
         for participant in participants:
             conn.execute("INSERT INTO participants (player_id, team_id) VALUES (?, ?)", (participant, None))
 
-        # Insert the participants into group_participants table
-        for i in range(1, 9):
-            conn.execute("INSERT INTO group_participants (group_id, participant_id) VALUES (?, ?)", (1, i))
-        for i in range(9, 17):
-            conn.execute("INSERT INTO group_participants (group_id, participant_id) VALUES (?, ?)", (2, i))
+        # Enroll all participants in event 1
+        for pid in participants:
+            conn.execute("INSERT INTO event_participants (event_id, participant_id) VALUES (?, ?)", (1, pid))
 
-        # Insert matches
-        for i in range(28):
-            conn.execute("INSERT INTO matches (group_id) VALUES (?)", (1,))
-        for i in range(28):
-            conn.execute("INSERT INTO matches (group_id) VALUES (?)", (2,))
-
-        # Insert match_participants (round-robin pairings)
-        group1_participants = list(range(1, 9))
-        group1_pairings = list(combinations(group1_participants, 2))
-        for match_idx, (p1, p2) in enumerate(group1_pairings):
-            match_id = match_idx + 1
-            conn.execute("INSERT INTO match_participants (match_id, participant_id) VALUES (?, ?)", (match_id, p1))
-            conn.execute("INSERT INTO match_participants (match_id, participant_id) VALUES (?, ?)", (match_id, p2))
-
-        group2_participants = list(range(9, 17))
-        group2_pairings = list(combinations(group2_participants, 2))
-        for match_idx, (p1, p2) in enumerate(group2_pairings):
-            match_id = match_idx + 29
-            conn.execute("INSERT INTO match_participants (match_id, participant_id) VALUES (?, ?)", (match_id, p1))
-            conn.execute("INSERT INTO match_participants (match_id, participant_id) VALUES (?, ?)", (match_id, p2))
-
-        # Insert match_participant_scores (dummy scores)
-        scores = [
-            (3, 1), (2, 0), (1, 3), (0, 2), (3, 2), (2, 1), (1, 0),
-            (2, 3), (0, 1), (3, 0), (1, 2), (2, 2), (3, 1), (0, 3),
-            (1, 1), (2, 0), (3, 2), (0, 1), (2, 3), (1, 0), (3, 1),
-            (0, 2), (2, 1), (1, 3), (3, 0), (2, 2), (0, 1), (1, 2),
-        ]
-        for match_idx, ((p1, p2), (s1, s2)) in enumerate(zip(group1_pairings, scores)):
-            match_id = match_idx + 1
-            conn.execute("INSERT INTO match_participant_scores (match_id, participant_id, score) VALUES (?, ?, ?)", (match_id, p1, s1))
-            conn.execute("INSERT INTO match_participant_scores (match_id, participant_id, score) VALUES (?, ?, ?)", (match_id, p2, s2))
-
-        for match_idx, ((p1, p2), (s1, s2)) in enumerate(zip(group2_pairings, scores)):
-            match_id = match_idx + 29
-            conn.execute("INSERT INTO match_participant_scores (match_id, participant_id, score) VALUES (?, ?, ?)", (match_id, p1, s1))
-            conn.execute("INSERT INTO match_participant_scores (match_id, participant_id, score) VALUES (?, ?, ?)", (match_id, p2, s2))
-
-        # Single elimination bracket (event_stage_id=2, group_id=3)
-        # 8 players → 4 QF + 2 SF + 1 Final = 7 matches
-        bracket_match_ids = []
-        for _ in range(7):
-            row = conn.execute("INSERT INTO matches (group_id) VALUES (?) RETURNING id", (3,)).fetchone()
-            bracket_match_ids.append(row["id"])
-
-        qf1, qf2, qf3, qf4, sf1, sf2, final = bracket_match_ids
-
-        # Wire up the bracket tree: QF → SF → Final
-        conn.execute("INSERT INTO bracket_matches (match_id, next_match_id) VALUES (?, ?)", (qf1, sf1))
-        conn.execute("INSERT INTO bracket_matches (match_id, next_match_id) VALUES (?, ?)", (qf2, sf1))
-        conn.execute("INSERT INTO bracket_matches (match_id, next_match_id) VALUES (?, ?)", (qf3, sf2))
-        conn.execute("INSERT INTO bracket_matches (match_id, next_match_id) VALUES (?, ?)", (qf4, sf2))
-        conn.execute("INSERT INTO bracket_matches (match_id, next_match_id) VALUES (?, ?)", (sf1, final))
-        conn.execute("INSERT INTO bracket_matches (match_id, next_match_id) VALUES (?, ?)", (sf2, final))
-        conn.execute("INSERT INTO bracket_matches (match_id, next_match_id) VALUES (?, NULL)", (final,))
-
-        # Assign participants to bracket matches
-        bracket_participants = [
-            (qf1, 1, 2), (qf2, 3, 4), (qf3, 5, 6), (qf4, 7, 8),
-            (sf1, 1, 3), (sf2, 5, 7),
-            (final, 1, 5),
-        ]
-        for mid, p1, p2 in bracket_participants:
-            conn.execute("INSERT INTO match_participants (match_id, participant_id) VALUES (?, ?)", (mid, p1))
-            conn.execute("INSERT INTO match_participants (match_id, participant_id) VALUES (?, ?)", (mid, p2))
-
-        # Add scores for QF matches
-        bracket_scores = [
-            (qf1, 1, 3, 2, 1), (qf2, 3, 2, 4, 0),
-            (qf3, 5, 1, 6, 3), (qf4, 7, 3, 8, 2),
-        ]
-        for mid, p1, s1, p2, s2 in bracket_scores:
-            conn.execute("INSERT INTO match_participant_scores (match_id, participant_id, score) VALUES (?, ?, ?)", (mid, p1, s1))
-            conn.execute("INSERT INTO match_participant_scores (match_id, participant_id, score) VALUES (?, ?, ?)", (mid, p2, s2))
+        # Groups stage (event_stage_id=1): 2 groups of 8
+        events.construct_groups_stage(conn, stage_id=1, num_groups=2)
 
         conn.commit()
     finally:

@@ -1,0 +1,34 @@
+<div id="event-player-container" class="event-players-container-v2">
+    <div class="players-column enrolled-column">
+        <h4 class="event-section-label">Iscritti</h4>
+        {% if not enrolled_participants %}
+            <div class="no-players-msg">Nessun giocatore iscritto</div>
+        {% else %}
+            <div class="enrolled-players-list">
+                {% for participant in enrolled_participants %}
+                    <div id="enrolled-participant-{{ participant.id }}" class="event-player-item enrolled">
+                        <span>{{ participant.name }}</span>
+                        <button class="item-delete" aria-label="Rimuovi" hx-delete="/api/events/{{ event_id }}/enrollv2/{{ participant.id }}"
+                            hx-target="#event-player-container" hx-trigger="click" hx-swap="outerHTML"></button>
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    </div>
+    {% if available_participants %}
+        <div class="players-column available-column">
+            <h4 class="event-section-label">Disponibili</h4>
+            <div class="available-players-list">
+                {% for participant in available_participants %}
+                    <div class="event-player-item available">
+                        <span>{{ participant.name }}</span>
+                        <button class="btn-enroll" title="Iscrivi" hx-post="/api/events/{{ event_id }}/enrollv2/{{ participant.id }}"
+                            hx-target="#event-player-container" hx-trigger="click" hx-swap="outerHTML">
+                            +
+                        </button>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+    {% endif %}
+</div>

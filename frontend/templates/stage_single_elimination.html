@@ -5,7 +5,7 @@
     {% set total_rows = first_round_matches * 2 %}
     {% set num_rounds = rounds | length %}
 
-    <div class="stage-bracket" style="grid-template-columns: repeat({{ num_rounds }}, 200px); grid-template-rows: repeat({{ total_rows }}, 1fr);">
+    <div class="stage-bracket" style="grid-template-columns: repeat({{ num_rounds }}, 150px); grid-template-rows: repeat({{ total_rows }}, 1fr);">
         {% for round in rounds %}
             {% set r = loop.index0 %}
             {% for match in round.matches %}

@@ -1,33 +1,29 @@
 <div id="modal-players-section">
     {% if enrolled %}
-    <div class="modal-subsection">
-        {% for p in enrolled %}
-        <div class="entity-element modal-list-item">
-            <span>{{ p.name }}</span>
-            <button class="btn-remove-stage"
-                hx-delete="/api/events/{{ event_id }}/enroll/{{ p.participant_id }}"
-                hx-target="#modal-players-section"
-                hx-swap="outerHTML">&#10005;</button>
+        <div class="modal-subsection">
+            {% for p in enrolled %}
+                <div class="entity-element modal-list-item">
+                    <span>{{ p.name }}</span>
+                    <button class="btn-remove-stage" hx-delete="/api/events/{{ event_id }}/enroll/{{ p.participant_id }}"
+                        hx-target="#modal-players-section" hx-swap="outerHTML">&#10005;</button>
+                </div>
+            {% endfor %}
         </div>
-        {% endfor %}
-    </div>
     {% endif %}
 
     {% if available %}
-    <div class="modal-subsection">
-        {% for p in available %}
-        <div class="entity-element modal-list-item"
-             hx-post="/api/events/{{ event_id }}/enroll/{{ p.id }}"
-             hx-target="#modal-players-section"
-             hx-swap="outerHTML">
-            <span>{{ p.name }}</span>
-            <span class="modal-add-btn">+</span>
+        <div class="modal-subsection">
+            {% for p in available %}
+                <div class="entity-element modal-list-item" hx-post="/api/events/{{ event_id }}/enroll/{{ p.id }}"
+                    hx-target="#modal-players-section" hx-swap="outerHTML">
+                    <span>{{ p.name }}</span>
+                    <span class="modal-add-btn">+</span>
+                </div>
+            {% endfor %}
         </div>
-        {% endfor %}
-    </div>
     {% endif %}
 
     {% if not enrolled and not available %}
-    <span class="form-hint">Nessun partecipante disponibile</span>
+        <span class="form-hint">Nessun partecipante disponibile</span>
     {% endif %}
 </div>
