@@ -17,6 +17,7 @@ from pathlib import Path
 from . import database
 from . import events
 
+#TODO: player enroll in the olympiad do not appear as available to be enrolled in events of that olympiad
 
 db_path = Path(os.environ["DATABASE_PATH"])
 schema_path = Path(os.environ["SCHEMA_PATH"])
@@ -1061,6 +1062,8 @@ def _create_entity(request: Request, entities: str, name: str):
             RETURNING id, name, version
             """
     else:
+        # When the entity is a player or a team I must insert an appropriate
+        # row into the participants table
         insert_sql = f"""
             INSERT INTO {entities} (name, olympiad_id)
             SELECT ?, ?
@@ -1083,6 +1086,17 @@ def _create_entity(request: Request, entities: str, name: str):
         return response
 
     if inserted_row:
+        if entities == "players":
+            conn.execute(
+                f"INSERT INTO participants (player_id, team_id) VALUES (?, ?)",
+                (inserted_row["id"], None)
+            )
+        else:
+            conn.execute(
+                f"INSERT INTO participants (player_id, team_id) VALUES (?, ?)",
+                (None, inserted_row["id"])
+            )
+
         conn.commit()
         item = {"id": inserted_row["id"], "name": inserted_row["name"], "version": inserted_row["version"]}
         html_content = templates.get_template("entity_element.html").render(
