@@ -3,7 +3,7 @@
     <button type="submit">+</button>
 </form>
 <div id="entity-list">
-    {% set hx_target = "#olympiad-badge-container" if entities == "olympiads" else "#main-content" %}
+    {% set hx_target = "#main-content" %}
     {% for item in items %}
         {% include 'entity_element.html' %}
     {% endfor %}

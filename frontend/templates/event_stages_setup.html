@@ -1,0 +1,27 @@
+<div id="stages-setup-section">
+    <div class="modal-subsection">
+        {% for sk in stage_kinds %}
+            <div class="entity-element modal-list-item"
+                hx-post="/api/events/{{ event_id }}/stages"
+                hx-vals='{"kind":"{{ sk.kind }}"}'
+                hx-target="#stages-setup-section"
+                hx-swap="outerHTML">
+                <span>{{ sk.label }}</span>
+                <span class="modal-add-btn">+</span>
+            </div>
+        {% endfor %}
+    </div>
+    {% if stages %}
+        <div class="modal-subsection">
+            {% for stage in stages %}
+                <div class="entity-element modal-list-item">
+                    <span>Fase {{ stage.stage_order }} — {{ stage.label }}</span>
+                    <button class="btn-remove-stage" hx-delete="/api/events/{{ event_id }}/stages/{{ stage.id }}"
+                        hx-target="#stages-setup-section" hx-swap="outerHTML">
+                        &#10005;
+                    </button>
+                </div>
+            {% endfor %}
+        </div>
+    {% endif %}
+</div>
