@@ -121,7 +121,7 @@ def seed_dummy_data(db_path: Path):
             conn.execute("INSERT INTO event_participants (event_id, participant_id) VALUES (?, ?)", (1, pid))
 
         # Groups stage (event_stage_id=1): 2 groups of 8
-        events.construct_groups_stage(conn, stage_id=1, num_groups=2)
+        events.generate_groups_stage(conn, stage_id=1, num_groups=2)
 
         conn.commit()
     finally:

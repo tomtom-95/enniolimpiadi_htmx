@@ -1,9 +1,20 @@
-<form class="entity-form" autocomplete="off" hx-post="/api/{{ entities }}" hx-target="#main-content">
-    <input type="text" name="name" placeholder="{{ placeholder }}" required>
-    <button type="submit">+</button>
-</form>
+{% if entities == "olympiads" %}
+    <form class="entity-form" hx-get="/api/olympiads/create" hx-target="#modal-container">
+        <input type="text" name="name" placeholder="{{ placeholder }}" required>
+        <button type="submit">+</button>
+    </form>
+{% else %}
+    <form class="entity-form" autocomplete="off" hx-post="/api/{{ entities }}" hx-target="#main-content">
+        <input type="text" name="name" placeholder="{{ placeholder }}" required>
+        <button type="submit">+</button>
+    </form>
+{% endif %}
 <div id="entity-list">
-    {% set hx_target = "#main-content" %}
+    {% if entities == "olympiads" %}
+        {% set hx_target = "#olympiad-badge-container" %}
+    {% else %}
+        {% set hx_target = "#main-content" %}
+    {% endif %}
     {% for item in items %}
         {% include 'entity_element.html' %}
     {% endfor %}

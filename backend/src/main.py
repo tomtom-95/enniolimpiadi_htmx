@@ -4,7 +4,6 @@ import json
 import secrets
 
 from contextlib import asynccontextmanager
-from collections import defaultdict, deque
 
 import sqlite3
 
@@ -16,8 +15,6 @@ from pathlib import Path
 
 from . import database
 from . import events
-
-#TODO: player enroll in the olympiad do not appear as available to be enrolled in events of that olympiad
 
 db_path = Path(os.environ["DATABASE_PATH"])
 schema_path = Path(os.environ["SCHEMA_PATH"])
@@ -44,103 +41,7 @@ select_olympiad_message = {
 }
 
 
-def build_single_elimination_stage(conn, stage_id):
-    """Build a single-elimination stage dict from DB data."""
-
-    # Load all bracket matches for this stage
-    rows = conn.execute(
-        "SELECT m.id AS match_id, bm.next_match_id "
-        "FROM groups g "
-        "JOIN matches m ON m.group_id = g.id "
-        "JOIN bracket_matches bm ON bm.match_id = m.id "
-        "WHERE g.event_stage_id = ?",
-        (stage_id,)
-    ).fetchall()
-
-    if not rows:
-        return { "rounds": [], "id": stage_id }
-
-    # Load participants for all these matches
-    match_ids = [r["match_id"] for r in rows]
-    placeholders = ",".join("?" * len(match_ids))
-    mp_rows = conn.execute(
-        f"SELECT mp.match_id, mp.participant_id, "
-        f"  COALESCE(pl.name, t.name) AS display_name "
-        f"FROM match_participants mp "
-        f"JOIN participants p ON p.id = mp.participant_id "
-        f"LEFT JOIN players pl ON pl.id = p.player_id "
-        f"LEFT JOIN teams t ON t.id = p.team_id "
-        f"WHERE mp.match_id IN ({placeholders})",
-        match_ids
-    ).fetchall()
-
-    # match_id -> list of (participant_id, name)
-    match_parts = defaultdict(list)
-    for r in mp_rows:
-        match_parts[r["match_id"]].append((r["participant_id"], r["display_name"]))
-
-    # Load scores
-    score_rows = conn.execute(
-        f"SELECT match_id, participant_id, score "
-        f"FROM match_participant_scores "
-        f"WHERE match_id IN ({placeholders})",
-        match_ids
-    ).fetchall()
-    score_map = {}
-    for r in score_rows:
-        score_map[(r["match_id"], r["participant_id"])] = r["score"]
-
-    # Build bracket tree
-    feeders = defaultdict(list)
-    matches_by_id = {}
-    for r in rows:
-        matches_by_id[r["match_id"]] = r
-        if r["next_match_id"] is not None:
-            feeders[r["next_match_id"]].append(r["match_id"])
-
-    # Find the final (next_match_id IS NULL)
-    final_id = None
-    for mid, r in matches_by_id.items():
-        if r["next_match_id"] is None:
-            final_id = mid
-            break
-
-    # BFS to assign round depths (0 = final)
-    round_assignment = {}
-    queue = deque([(final_id, 0)])
-    while queue:
-        mid, depth = queue.popleft()
-        round_assignment[mid] = depth
-        for feeder_id in feeders.get(mid, []):
-            queue.append((feeder_id, depth + 1))
-
-    # Group by round, earliest rounds first
-    max_round = max(round_assignment.values()) if round_assignment else 0
-    rounds_list = []
-    for r in range(max_round, -1, -1):
-        mids_in_round = [mid for mid, rn in round_assignment.items() if rn == r]
-
-        match_dicts = []
-        for mid in mids_in_round:
-            parts = match_parts.get(mid, [])
-            p1 = parts[0][1] if len(parts) > 0 else "?"
-            p2 = parts[1][1] if len(parts) > 1 else "?"
-            s1 = score_map.get((mid, parts[0][0])) if len(parts) > 0 else None
-            s2 = score_map.get((mid, parts[1][0])) if len(parts) > 1 else None
-            if s1 is not None and s2 is not None:
-                score = f"{s1} - {s2}"
-            else:
-                score = "- vs -"
-            match_dicts.append({"p1": p1, "p2": p2, "score": score})
-
-        rounds_list.append({"matches": match_dicts})
-
-    res = { "rounds": rounds_list, "id": stage_id }
-
-    return res
-
-
-def derive_event_status(current_stage_order, max_stage_order):
+def derive_event_status(current_stage_order: int, max_stage_order: int):
     """Derive the event's display status from current_stage_order.
 
     - NULL or 0 → 'registration'
@@ -152,78 +53,6 @@ def derive_event_status(current_stage_order, max_stage_order):
     if max_stage_order is not None and current_stage_order > max_stage_order:
         return "finished"
     return "started"
-
-
-def build_groups_stage(conn, stage_id: int):
-    """Build and render a groups stage for display."""
-
-    # Build groups data
-    group_rows = conn.execute(
-        "SELECT id FROM groups WHERE event_stage_id = ? ORDER BY id",
-        (stage_id,)
-    ).fetchall()
-
-    groups = []
-    for idx, grow in enumerate(group_rows):
-        gid = grow["id"]
-
-        # Participant names in seed order
-        part_rows = conn.execute(
-            "SELECT gp.participant_id, COALESCE(pl.name, t.name) AS display_name "
-            "FROM group_participants gp "
-            "JOIN participants p ON p.id = gp.participant_id "
-            "LEFT JOIN players pl ON pl.id = p.player_id "
-            "LEFT JOIN teams t ON t.id = p.team_id "
-            "WHERE gp.group_id = ? ORDER BY gp.seed",
-            (gid,)
-        ).fetchall()
-
-        participants = [r["display_name"] for r in part_rows]
-        pid_to_name = {r["participant_id"]: r["display_name"] for r in part_rows}
-
-        match_rows = conn.execute(
-            "SELECT m.id, "
-            "  mp1.participant_id AS p1_id, mp2.participant_id AS p2_id, "
-            "  mps1.score AS p1_score, mps2.score AS p2_score "
-            "FROM matches m "
-            "JOIN match_participants mp1 ON mp1.match_id = m.id "
-            "JOIN match_participants mp2 ON mp2.match_id = m.id "
-            "  AND mp2.participant_id > mp1.participant_id "
-            "LEFT JOIN match_participant_scores mps1 "
-            "  ON mps1.match_id = m.id AND mps1.participant_id = mp1.participant_id "
-            "LEFT JOIN match_participant_scores mps2 "
-            "  ON mps2.match_id = m.id AND mps2.participant_id = mp2.participant_id "
-            "WHERE m.group_id = ?",
-            (gid,)
-        ).fetchall()
-
-        scores = {}
-        for mr in match_rows:
-            p1_name = pid_to_name.get(mr["p1_id"])
-            p2_name = pid_to_name.get(mr["p2_id"])
-            if p1_name and p2_name:
-                score_str = (
-                    f"{mr['p1_score']} - {mr['p2_score']}"
-                    if mr["p1_score"] is not None and mr["p2_score"] is not None
-                    else None
-                )
-                scores.setdefault(p1_name, {})[p2_name] = score_str
-
-        groups.append({
-            "name": f"Girone {chr(65 + idx)}",
-            "participants": participants,
-            "scores": scores,
-        })
-
-    total_participants = sum(len(g["participants"]) for g in groups)
-
-    stage = {
-        "groups": groups,
-        "id": stage_id,
-        "total_participants": total_participants
-    }
-
-    return stage
 
 
 def trigger_badge_update(response: Response) -> None:
@@ -252,19 +81,7 @@ def verify_olympiad_access(conn, session_id, olympiad_id, olympiad_version):
     return row is not None
 
 
-# TODO: how can I verify that the version the user is looking is the up-to-date?
-#       verify that the event has not changed its name means just verifying that
-#       the version field in the database has not changed (which means every time)
-#       an operation on an event is made the endpoint must receive the event version.
-#       While the event modal is open, the event is already created in the database
-#       There are some endpoints that do not retrieve the version field, so we do not know
-#       if we are doing a modification on the last version. The bigger problem is that the version
-#       field on the events table is not enough: if someone starts adding players to the event
-#       in the database this translates with adding new rows to event_participants table, adding new
-#       rows to the group_participants table and matches and match_participants table (if a stage has been
-#       previously defined). This means the checks now are not only on the version field in events table
-#       but are more specific (must reason about every specific case)
-#       There are some authentication checks and version check that I always want to do
+# TODO: integrate event_version in verify_event_access
 def verify_event_access(conn, session_id, event_id):
     """Check event exists and session is authorized. Returns olympiad_id or None."""
     row = conn.execute(
@@ -279,14 +96,14 @@ def verify_event_access(conn, session_id, event_id):
     ).fetchone()
     return row["olympiad_id"] if row else None
 
-
+# TODO: diagnose_event_noop (as diagnose_entity_noop) must check if the problem is the version
 def diagnose_event_noop(
     request: Request,
     event_id: int,
     session_id: str,
-    replay_method: str,
-    replay_url: str,
-    replay_vals: dict,
+    replay_method: str = "",
+    replay_url: str = "",
+    replay_vals: dict = {},
 ) -> Response:
     """
     Diagnose why an event operation was a no-op and return appropriate response.
@@ -330,10 +147,12 @@ def diagnose_event_noop(
     response = templates.TemplateResponse(
         request, "pin_modal.html", {
             "action": "/api/validate_pin",
-            "replay_method": replay_method,
-            "replay_url": replay_url,
-            "replay_vals": replay_vals,
-            "olympiad_id": event["olympiad_id"],
+            "params": {
+                "replay_method": replay_method,
+                "replay_url": replay_url,
+                "replay_vals": json.dumps(replay_vals),
+                "olympiad_id": event["olympiad_id"],
+            },
         }
     )
     response.headers["HX-Retarget"] = "#modal-container"
@@ -412,10 +231,12 @@ def diagnose_entity_noop(
     response = templates.TemplateResponse(
         request, "pin_modal.html", {
             "action": "/api/validate_pin",
-            "replay_method": replay_method,
-            "replay_url": replay_url,
-            "replay_vals": replay_vals,
-            "olympiad_id": olympiad_id,
+            "params": {
+                "replay_method": replay_method,
+                "replay_url": replay_url,
+                "replay_vals": json.dumps(replay_vals),
+                "olympiad_id": olympiad_id,
+            },
         }
     )
     response.headers["HX-Retarget"] = "#modal-container"
@@ -495,10 +316,12 @@ def diagnose_olympiad_noop(
     response = templates.TemplateResponse(
         request, "pin_modal.html", {
             "action": "/api/validate_pin",
-            "replay_method": replay_method,
-            "replay_url": replay_url,
-            "replay_vals": replay_vals,
-            "olympiad_id": olympiad_id,
+            "params": {
+                "replay_method": replay_method,
+                "replay_url": replay_url,
+                "replay_vals": json.dumps(replay_vals),
+                "olympiad_id": olympiad_id,
+            },
         }
     )
     response.headers["HX-Retarget"] = "#modal-container"
@@ -623,9 +446,15 @@ def list_olympiads(request: Request):
 
     cursor = conn.execute("SELECT id, name, version FROM olympiads")
     rows = [{"id": row["id"], "name": row["name"], "version": row["version"]} for row in cursor.fetchall()]
+
     return templates.TemplateResponse(
-        request, "olympiad_list.html",
-        {"items": rows}
+        request,
+        "entity_list.html",
+        {
+            "entities": "olympiads",
+            "placeholder": "Tusorella",
+            "items": rows
+        }
     )
 
 
@@ -642,11 +471,9 @@ def get_create_olympiad_modal(request: Request, name: str = Query(...)):
 
 
 @app.post("/api/olympiads")
-def create_olympiad(request: Request, pin: str = Form(...), params: str = Form(...)):
+def create_olympiad(request: Request, pin: str = Form(...), name: str = Form(...)):
     conn = request.state.conn
     session_id = request.state.session_id
-
-    name = json.loads(params)["name"]
 
     if len(pin) != 4:
         response = templates.TemplateResponse(
@@ -735,7 +562,7 @@ def rename_olympiad(
     request: Request,
     olympiad_id: int,
     name: str = Form(...),
-    olympiad_version: int = Form(..., alias="version"),
+    olympiad_version: int = Form(..., alias="version")
 ):
     conn = request.state.conn
     session_id = request.state.session_id
@@ -825,7 +652,7 @@ def delete_olympiad(request: Request, olympiad_id: int, olympiad_version: int = 
 # ---------------------------------------------------------------------------
 
 @app.get("/api/events/{event_id}")
-def select_event(request: Request, event_id: int, event_version: int = Query(..., alias="version")):
+def select_event(request: Request, event_id: int, version: int = Query(..., alias="version")):
     conn = request.state.conn
     session_id = request.state.session_id
     session_data = get_session_data(conn, session_id)
@@ -838,7 +665,7 @@ def select_event(request: Request, event_id: int, event_version: int = Query(...
         WHERE id = ?
             AND version = ?
             AND olympiad_id = ?""",
-        (event_id, event_version, olympiad_id)
+        (event_id, version, olympiad_id)
     ).fetchone()
 
     if event:
@@ -848,10 +675,7 @@ def select_event(request: Request, event_id: int, event_version: int = Query(...
         ).fetchone()
         max_stage_order = max_stage["max_order"] if max_stage else None
 
-        event_status = derive_event_status(
-            event["current_stage_order"],
-            max_stage_order
-        )
+        event_status = derive_event_status(event["current_stage_order"], max_stage_order)
 
         return templates.TemplateResponse(
             request, "event_page.html",
@@ -866,7 +690,13 @@ def select_event(request: Request, event_id: int, event_version: int = Query(...
         )
     else:
         return diagnose_entity_noop(
-            request, "events", event_id, event_version, olympiad_id, session_id, conn,
+            request,
+            "events",
+            event_id,
+            event_version,
+            olympiad_id,
+            session_id,
+            conn,
             replay_method="get",
             replay_url=f"/api/events/{event_id}?version={event_version}",
             replay_vals={},
@@ -952,11 +782,11 @@ def get_event_stage(request: Request, event_id: int, stage_order: int):
     ).fetchone()["count"]
 
     if stage_kind == "groups":
-        stage = build_groups_stage(conn, stage_id)
+        stage = events.present_groups_stage(conn, stage_id)
     elif stage_kind == "round_robin":
         return HTMLResponse("<div class='error-banner'>Fase non trovata</div>")
     elif stage_kind == "single_elimination":
-        stage = build_single_elimination_stage(conn, stage_id)
+        stage = events.present_single_elimination_stage(conn, stage_id)
 
     stage["name"] = stage_label
 
@@ -983,6 +813,16 @@ def resize_stage_groups(
     num_groups: int = Form(...),
 ):
     conn = request.state.conn
+
+    # TODO: check that teh user is authorized to resize the stage group
+    #       this check must always include a check on the version number in the events table
+    #       if that has changed (for whatever reason!) the user must not change anything
+    #       it must first reload the page so that he have the up-to-date content
+    #       so a pop-up must ask the user to reload the page, this can be the usual catch all (at leat for now)
+    #       then we will think to have one specific to reload the event page the user was working on
+    #       If I want to use verify_event_access for this it means verify_event_access must also always check
+    #       the version number of the event
+
     event_row = conn.execute(
         "SELECT current_stage_order FROM events WHERE id = ?", (event_id,)
     ).fetchone()
@@ -1004,11 +844,11 @@ def resize_stage_groups(
     if total < 2:
         return HTMLResponse("<div class='error-banner'>Servono almeno 2 partecipanti</div>")
 
-    events.construct_groups_stage(conn, stage_id, num_groups)
+    events.generate_groups_stage(conn, stage_id, num_groups)
     conn.commit()
 
     # Re-render only the groups section
-    stage = build_groups_stage(conn, stage_id)
+    stage = events.present_groups_stage(conn, stage_id)
 
     return templates.TemplateResponse(
         request, "stage_groups.html",
@@ -1207,10 +1047,12 @@ def _create_entity(request: Request, entities: str, name: str):
     response = templates.TemplateResponse(
         request, "pin_modal.html", {
             "action": "/api/validate_pin",
-            "replay_method": "post",
-            "replay_url": f"/api/{entities}",
-            "replay_vals": {"name": name},
-            "olympiad_id": olympiad_id,
+            "params": {
+                "replay_method": "post",
+                "replay_url": f"/api/{entities}",
+                "replay_vals": json.dumps({"name": name}),
+                "olympiad_id": olympiad_id,
+            },
         }
     )
     response.headers["HX-Retarget"] = "#modal-container"
@@ -1376,10 +1218,12 @@ def create_event(request: Request, name: str = Form(...)):
             "pin_modal.html",
             {
                 "action": "/api/validate_pin",
-                "replay_method": "post",
-                "replay_url": "/api/events",
-                "replay_vals": {"name": name},
-                "olympiad_id": olympiad_id,
+                "params": {
+                    "replay_method": "post",
+                    "replay_url": "/api/events",
+                    "replay_vals": json.dumps({"name": name}),
+                    "olympiad_id": olympiad_id,
+                },
             }
         )
         response.headers["HX-Retarget"] = "#modal-container"
@@ -1455,8 +1299,21 @@ def update_event_score_kind(request: Request, event_id: int, score_kind: str = F
 
 
 @app.get("/api/events/{event_id}/setup")
-def get_event_setup(request: Request, event_id: int):
+def get_event_setup(
+    request: Request,
+    event_id: int,
+    version: int = Query(...)
+):
     conn = request.state.conn
+    session_id = request.state.session_id
+
+    # TODO: even if it is just a user that is looking and not modifying
+    #       he must receive a feedback if the name of the event has changed of the event does not exist
+    event = conn.execute(
+        "SELECT id FROM events WHERE id = ? AND version = ?", (event_id, version)
+    ).fetchone()
+    if not event:
+        return diagnose_event_noop(request, event_id, session_id)
 
     current_score_kind = conn.execute(
         "SELECT score_kind FROM events WHERE id = ?", (event_id,)
@@ -1505,11 +1362,7 @@ def add_event_stage(request: Request, event_id: int, kind: str = Form(...)):
 
 
 @app.delete("/api/events/{event_id}/stages/{stage_id}")
-def remove_event_stage(
-    request: Request,
-    event_id: int,
-    stage_id: int,
-):
+def remove_event_stage(request: Request, event_id: int, stage_id: int):
     conn = request.state.conn
     conn.execute("DELETE FROM event_stages WHERE id = ? AND event_id = ?", (stage_id, event_id))
 
@@ -1581,9 +1434,9 @@ def enrollv2_participant(request: Request, event_id: int, participant_id: int):
         stage_kind = first_stage["kind"]
         if stage_kind == "groups":
             groups = conn.execute("SELECT id FROM groups WHERE event_stage_id = ?", (stage_id,)).fetchall()
-            events.construct_groups_stage(conn, stage_id, len(groups))
+            events.generate_groups_stage(conn, stage_id, len(groups))
         elif stage_kind == "single_elimination":
-            events.construct_single_elimination_stage(conn, stage_id)
+            events.generate_single_elimination_stage(conn, stage_id)
 
     conn.commit()
 
@@ -1637,8 +1490,8 @@ def unenrollv2_participant(request: Request, event_id: int, participant_id: int)
 
     # the pipeline must be
     #   delete the participants from the event: which means delete one row from event_participants
-    #   reconstruct the first stage 
-    #   the problem right now is that I am constructing stuff for the second stage
+    #   regenerate the first stage 
+    #   the problem right now is that I am generateing stuff for the second stage
     #   to solve this I can check event_id and allow unenroll only when current_stage_order is 0
     #   meaning the event has no started yet
     #   I must only put stuff on the first stage
@@ -1662,9 +1515,9 @@ def unenrollv2_participant(request: Request, event_id: int, participant_id: int)
         stage_kind = first_stage["kind"]
         if stage_kind == "groups":
             groups = conn.execute("SELECT id FROM groups WHERE event_stage_id = ?", (stage_id,)).fetchall()
-            events.construct_groups_stage(conn, stage_id, len(groups))
+            events.generate_groups_stage(conn, stage_id, len(groups))
         elif stage_kind == "single_elimination":
-            events.construct_single_elimination_stage(conn, stage_id)
+            events.generate_single_elimination_stage(conn, stage_id)
 
     conn.commit()
 
@@ -1805,7 +1658,9 @@ def validate_pin(
         # PIN correct, auth granted - replay the original request
         conn.commit()
         response = templates.TemplateResponse(
-            request, "replay_trigger.html", {
+            request,
+            "replay_trigger.html",
+            {
                 "replay_method": replay_method,
                 "replay_url": replay_url,
                 "replay_vals": parsed_vals,
@@ -1832,12 +1687,16 @@ def validate_pin(
     # Wrong PIN - show error modal
     if diag["olympiad_exists"] and not diag["pin_correct"]:
         response = templates.TemplateResponse(
-            request, "pin_modal.html", {
+            request,
+            "pin_modal.html",
+            {
                 "action": "/api/validate_pin",
-                "replay_method": replay_method,
-                "replay_url": replay_url,
-                "replay_vals": parsed_vals,
-                "olympiad_id": olympiad_id,
+                "params": {
+                    "replay_method": replay_method,
+                    "replay_url": replay_url,
+                    "replay_vals": json.dumps(parsed_vals),
+                    "olympiad_id": olympiad_id,
+                },
                 "error": "PIN errato"
             }
         )
@@ -1847,7 +1706,9 @@ def validate_pin(
 
     # Olympiad deleted or already authorized - replay and let endpoint handle it
     response = templates.TemplateResponse(
-        request, "replay_trigger.html", {
+        request,
+        "replay_trigger.html",
+        {
             "replay_method": replay_method,
             "replay_url": replay_url,
             "replay_vals": parsed_vals,
