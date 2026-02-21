@@ -1,6 +1,13 @@
-<div class="error-state">
-    <p>Il nome dell'olimpiade su cui stavi lavorando o che hai cliccato è stato modificato da qualche admin</p>
-    <button hx-get="/api/olympiads" hx-target="#main-content">Aggiorna l'applicazione</button>
+<div id="modal" _="on closeModal from body remove me">
+    <div class="modal-underlay" _="on click trigger closeModal on body"></div>
+    <div class="modal-content" _="on click halt the event's bubbling">
+        <p>Il nome dell'olimpiade su cui stavi lavorando o che hai cliccato è stato modificato da qualche admin</p>
+        <div class="modal-actions">
+            <button hx-get="/api/olympiads"
+                hx-target="#main-content"
+                _="on click trigger closeModal on body">
+                Aggiorna l'applicazione
+            </button>
+        </div>
+    </div>
 </div>
-
-<div id="olympiad-badge-container" hx-swap-oob="true">{{ olympiad_name }}</div>

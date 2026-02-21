@@ -1,3 +1,9 @@
-<div id="olympiad-badge" data-id="{{ olympiad.id }}" data-version="{{ olympiad.version }}">
+<div id="olympiad-badge"
+    data-id="{{ olympiad.id }}"
+    data-version="{{ olympiad.version }}"
+    data-name="{{ olympiad.name }}"
+    {% if oob %}
+        hx-swap-oob="true"
+    {% endif %}>
     <span class="olympiad-name">{{ olympiad.name }}</span>
 </div>

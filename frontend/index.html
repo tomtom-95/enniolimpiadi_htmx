@@ -15,7 +15,9 @@
                     <div class="hamburger-inner"></div>
                 </div>
             </div>
-            <div id="olympiad-badge-container" hx-get="/api/badge" hx-trigger="load, badgeChanged from:body">Olympiad badge</div>
+            <div id="olympiad-badge">
+                Olympiad badge
+            </div>
         </div>
         <div class="content-area">
             <div class="side-menu is-collapsed">
@@ -34,6 +36,15 @@
     document.querySelector('.hamburger').addEventListener('mousedown', function() {
         this.classList.toggle('is-active');
         document.querySelector('.side-menu').classList.toggle('is-collapsed');
+    });
+
+    document.body.addEventListener('htmx:configRequest', function(evt) {
+        const badge = document.getElementById('olympiad-badge');
+        if (badge && badge.dataset.id) {
+            evt.detail.headers['X-Olympiad-Id'] = badge.dataset.id;
+            evt.detail.headers['X-Olympiad-Version'] = badge.dataset.version;
+            evt.detail.headers['X-Olympiad-Name'] = badge.dataset.name;
+        }
     });
 </script>
 </html>

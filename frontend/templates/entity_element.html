@@ -1,13 +1,27 @@
-<div id="{{ entities }}-{{ item.id }}" class="entity-element"
-    hx-get="/api/{{ entities }}/{{ item.id }}?version={{ item.version }}" hx-target="{{ hx_target }}" hx-trigger="mousedown">
-    <div class="item">{{ item.name }}</div>
+<div id="{{ entities }}-{{ item.id }}"
+    class="entity-element"
+    hx-get="/api/{{ entities }}/{{ item.id }}?name={{ item.name }}"
+    hx-target="{{ hx_target }}"
+    hx-trigger="click">
+    <div class="item">
+        {{ item.name }}
+    </div>
     <div class="item-icons">
-        <button class="item-rename" aria-label="Rename"
-            hx-get="/api/{{ entities }}/{{ item.id }}/edit?name={{ item.name }}&version={{ item.version }}"
-            hx-target="#{{ entities }}-{{ item.id }}" hx-trigger="mousedown consume" hx-swap="outerHTML">
+        <button class="item-rename"
+            aria-label="Rename"
+            hx-get="/api/{{ entities }}/{{ item.id }}/edit?name={{ item.name }}"
+            hx-target="#{{ entities }}-{{ item.id }}"
+            hx-trigger="click"
+            hx-swap="outerHTML"
+            hx-on:click="event.stopPropagation()">
         </button>
-        <button class="item-delete" aria-label="Delete" hx-delete="/api/{{ entities }}/{{ item.id }}?version={{ item.version }}"
-            hx-target="#{{ entities }}-{{ item.id }}" hx-trigger="click" hx-swap="outerHTML" hx-on:mousedown="event.stopPropagation()">
+        <button class="item-delete"
+            aria-label="Delete"
+            hx-delete="/api/{{ entities }}/{{ item.id }}?name={{ item.name }}"
+            hx-target="#{{ entities }}-{{ item.id }}"
+            hx-trigger="click"
+            hx-swap="outerHTML"
+            hx-on:click="event.stopPropagation()">
         </button>
     </div>
 </div>

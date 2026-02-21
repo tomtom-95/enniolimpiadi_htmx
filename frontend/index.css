@@ -18,7 +18,8 @@ html, body {
     margin: 0;
     padding: 0;
     height: 100%;
-    min-width: 320px;
+    min-width: 300px;
+    overflow-x: hidden;
 }
 
 a {
@@ -45,7 +46,6 @@ button {
 body {
     display: flex;
     flex-direction: column;
-    overflow-x: hidden;
 }
 
 .top-bar {
@@ -62,6 +62,7 @@ body {
     display: flex;
     flex: 1;
     min-height: 0;
+    overflow: hidden;
 }
 
 #main-content {
@@ -79,7 +80,7 @@ body {
  */
 .side-menu {
     display: flex;
-    width: 150px;
+    width: 130px;
     flex-shrink: 0;
     overflow: hidden;
     transition: width 0.3s ease;
@@ -383,7 +384,7 @@ body {
 /*
  * Olympiad badge
  */
-#olympiad-badge-container {
+#olympiad-badge {
     padding: 8px 16px;
     background-color: #2d2a4a;
     color: #faf5eb;
@@ -442,21 +443,20 @@ body {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0.75rem 1rem;
-    margin-bottom: 0.5rem;
+    padding: 0.4rem 0.5rem;
+    margin-bottom: 0.1rem;
     background-color: #fff3cd;
     border-left: 4px solid #ffc107;
     color: #856404;
     font-weight: 500;
     font-style: italic;
-    overflow: scroll;
-    max-height: 100px;
+    flex-shrink: 0;
+    overflow: hidden;
     opacity: 1;
     transition: max-height 200ms ease-out, opacity 200ms ease-out, margin-bottom 200ms ease-out, padding 200ms ease-out;
 }
 
 .entity-deleted-message.removing {
-    max-height: 0;
     opacity: 0;
     margin-bottom: 0;
     padding-top: 0;
@@ -465,7 +465,8 @@ body {
 
 .entity-deleted-message span {
     white-space: nowrap;
-    overflow-x: auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
     flex: 1;
     min-width: 0;
 }
@@ -473,7 +474,10 @@ body {
 .entity-deleted-message .dismiss-btn {
     flex-shrink: 0;
     margin-left: 1rem;
-    padding: 0.25rem 0.75rem;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    box-sizing: border-box;
     font-size: 0.875rem;
     color: #856404;
     background-color: transparent;
@@ -635,29 +639,30 @@ body {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0.75rem 1rem;
+    padding: 0.4rem 0.5rem;
+    margin-bottom: 0.1rem;
     background-color: #17a2b8;
-    border: 1px solid #17a2b8;
+    border-left: 4px solid #17a2b8;
     color: #ffffff;
-    font-size: 1.25rem;
     font-weight: 500;
     font-style: italic;
-    overflow: scroll;
-    max-height: 200px;
+    flex-shrink: 0;
+    overflow: hidden;
     opacity: 1;
-    transition: max-height 200ms ease-out, opacity 200ms ease-out, padding 200ms ease-out;
+    transition: opacity 200ms ease-out, margin-bottom 200ms ease-out, padding 200ms ease-out;
 }
 
 .entity-rename-message.removing {
-    max-height: 0;
     opacity: 0;
+    margin-bottom: 0;
     padding-top: 0;
     padding-bottom: 0;
 }
 
 .entity-rename-message span {
     white-space: nowrap;
-    overflow-x: auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
     flex: 1;
     min-width: 0;
 }
@@ -665,7 +670,10 @@ body {
 .entity-rename-message .dismiss-btn {
     flex-shrink: 0;
     margin-left: 1rem;
-    padding: 0.25rem 0.75rem;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    box-sizing: border-box;
     font-size: 0.875rem;
     color: #ffffff;
     background-color: transparent;
