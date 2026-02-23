@@ -107,7 +107,7 @@ def generate_single_elimination_stage(conn, stage_id: int):
 
     # Standard bracket seeding ensures top seeds meet as late as possible.
     # For bracket_size=8: [1,8, 4,5, 2,7, 3,6]
-    #   → match 0: seed 1 vs 8, match 1: seed 4 vs 5, etc.
+    #   -> match 0: seed 1 vs 8, match 1: seed 4 vs 5, etc.
     def bracket_seeding(size):
         if size == 1:
             return [1]

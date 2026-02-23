@@ -15,7 +15,10 @@
                     <div class="hamburger-inner"></div>
                 </div>
             </div>
-            <div id="olympiad-badge">
+            <div id="olympiad-badge"
+                data-id="0"
+                data-version="0"
+                data-name="Olympiad badge">
                 Olympiad badge
             </div>
         </div>
@@ -40,11 +43,9 @@
 
     document.body.addEventListener('htmx:configRequest', function(evt) {
         const badge = document.getElementById('olympiad-badge');
-        if (badge && badge.dataset.id) {
-            evt.detail.headers['X-Olympiad-Id'] = badge.dataset.id;
-            evt.detail.headers['X-Olympiad-Version'] = badge.dataset.version;
-            evt.detail.headers['X-Olympiad-Name'] = badge.dataset.name;
-        }
+        evt.detail.headers['X-Olympiad-Id'] = badge.dataset.id;
+        evt.detail.headers['X-Olympiad-Version'] = badge.dataset.version;
+        evt.detail.headers['X-Olympiad-Name'] = badge.dataset.name;
     });
 </script>
 </html>

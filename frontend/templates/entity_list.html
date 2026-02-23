@@ -1,5 +1,8 @@
 {% if entities == "olympiads" %}
-    <form class="entity-form" hx-get="/api/olympiads/create" hx-target="#modal-container">
+    <form class="entity-form"
+        hx-get="/api/olympiads/create"
+        hx-target="#modal-container"
+        autocomplete="off">
         <input type="text" name="name" placeholder="{{ placeholder }}" required>
         <button type="submit">+</button>
     </form>

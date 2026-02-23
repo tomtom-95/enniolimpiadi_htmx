@@ -39,6 +39,9 @@ select_olympiad_message = {
     "teams": "Seleziona un'olimpiade per visualizzare tutti i team",
 }
 
+sentinel_olympiad_badge = {"id": 0, "name": "Olympiad Badge", "version": 0}
+
+
 
 def derive_event_status(current_stage_order: int, max_stage_order: int):
     """Derive the event's display status from current_stage_order.
@@ -56,24 +59,142 @@ def derive_event_status(current_stage_order: int, max_stage_order: int):
 
 def get_olympiad_from_request(request: Request):
     """Read selected olympiad data from request headers (set by client-side JS)."""
-    olympiad_id = request.headers.get("X-Olympiad-Id")
-    if not olympiad_id:
-        return None
     return {
-        "id": int(olympiad_id),
-        "version": int(request.headers.get("X-Olympiad-Version", 0)),
+        "id": int(request.headers.get("X-Olympiad-Id", "0")),
+        "version": int(request.headers.get("X-Olympiad-Version", "0")),
         "name": request.headers.get("X-Olympiad-Name", ""),
     }
 
 
-def verify_olympiad_access(conn, session_id, olympiad_id):
+def verify_olympiad_access(conn, session_id, olympiad_id, olympiad_name):
     row = conn.execute(
         """
         SELECT 1 FROM olympiads o
         JOIN session_olympiad_auth soa ON soa.olympiad_id = o.id AND soa.session_id = ?
-        WHERE o.id = ?
+        WHERE o.id = ? AND o.name = ?
         """,
-        (session_id, olympiad_id)
+        (session_id, olympiad_id, olympiad_name)
+    ).fetchone()
+    return row is not None
+
+
+def _access_denied_response(request, conn, olympiad_id, olympiad_name, replay_vals):
+    olympiad = conn.execute("SELECT * FROM olympiads WHERE id = ?", (olympiad_id,)).fetchone()
+
+    if not olympiad:
+        html_content = templates.get_template("olympiad_not_found.html").render()
+        html_content += _oob_badge_html(request, olympiad_id, sentinel_olympiad_badge)
+        response = HTMLResponse(html_content)
+    else:
+        if olympiad["name"] != olympiad_name:
+            html_content = templates.get_template("olympiad_name_changed.html").render()
+            html_content += _oob_badge_html(
+                request,
+                olympiad_id,
+                {
+                    "id": olympiad["id"],
+                    "name": olympiad["name"],
+                    "version": olympiad["version"]
+                }
+            )
+            response = HTMLResponse(html_content)
+        else:
+            replay_url = request.url.path
+            if request.url.query:
+                replay_url += f"?{request.url.query}"
+
+            response = templates.TemplateResponse(
+                request, "pin_modal.html", {
+                    "action": "/api/validate_pin",
+                    "params": {
+                        "replay_method": request.method.lower(),
+                        "replay_url": replay_url,
+                        "replay_vals": json.dumps(replay_vals),
+                        "olympiad_id": olympiad_id,
+                    },
+                }
+            )
+
+    response.headers["HX-Retarget"] = "#modal-container"
+    response.headers["HX-Reswap"] = "innerHTML"
+
+    return response
+
+
+def check_olympiad_auth(request, olympiad_id: int, olympiad_name: str, replay_vals = None):
+    if not replay_vals:
+        replay_vals = {}
+
+    conn = request.state.conn
+    session_id = request.state.session_id
+
+    if verify_olympiad_access(conn, session_id, olympiad_id, olympiad_name):
+        return True, None
+
+    response = _access_denied_response(request, conn, olympiad_id, olympiad_name, replay_vals)
+
+    return False, response
+
+
+def check_selected_olympiad(request):
+    conn = request.state.conn
+    olympiad_data = get_olympiad_from_request(request)
+
+    if olympiad_data["id"] != 0:
+        selected = conn.execute(
+            "SELECT id, name, version FROM olympiads WHERE id = ?",
+            (olympiad_data["id"],)
+        ).fetchone()
+
+        if not selected:
+            html = templates.get_template("olympiad_not_found.html").render()
+            html += _oob_badge_html(request, olympiad_data["id"], sentinel_olympiad_badge)
+            response = HTMLResponse(html)
+            response.headers["HX-Retarget"] = "#modal-container"
+            response.headers["HX-Reswap"] = "innerHTML"
+            return False, response
+
+        if selected["name"] != olympiad_data["name"]:
+            html = templates.get_template("olympiad_name_changed.html").render()
+            olympiad_badge = { "id": selected["id"], "name": selected["name"], "version": selected["version"] }
+            html += _oob_badge_html(request, olympiad_data["id"], olympiad_badge)
+            response = HTMLResponse(html)
+            response.headers["HX-Retarget"] = "#modal-container"
+            response.headers["HX-Reswap"] = "innerHTML"
+            return False, response
+
+    return True, None
+
+
+def check_required_olympiad(request, entities):
+    olympiad_data = get_olympiad_from_request(request)
+    if olympiad_data["id"] == 0:
+        response = templates.TemplateResponse(
+            request,
+            "select_olympiad_required.html",
+            {"message": select_olympiad_message[entities]}
+        )
+        return False, response
+    return check_selected_olympiad(request)
+
+
+# TODO: look at all the occurrences of _oob_badge_html
+def _oob_badge_html(request, olympiad_id, olympiad):
+    """Return OOB badge HTML if the affected olympiad is currently selected, else ''."""
+    olympiad_data = get_olympiad_from_request(request)
+    if olympiad_id == olympiad_data["id"]:
+        return templates.get_template("olympiad_badge.html").render(olympiad=olympiad, oob=True)
+    else:
+        return templates.get_template("olympiad_badge.html").render(olympiad=olympiad_data, oob=True)
+
+
+def verify_olympiad_data(request, olympiad_data):
+    row = request.state.conn.execute(
+        """
+        SELECT 1 FROM olympiads o
+        WHERE o.id = ? AND o.name = ?
+        """,
+        (olympiad_data["id"], olympiad_data["name"])
     ).fetchone()
     return row is not None
 
@@ -94,55 +215,34 @@ def verify_event_access(conn, session_id, event_id):
     return row["olympiad_id"] if row else None
 
 
-def diagnose_select_item_noop(
-    request: Request,
-    items: str,
-    item_id: int,
-    item_name: str,
-    selected_olympiad_id: int
-) -> Response:
+def check_entity(request, entities, entity_id, entity_name):
     conn = request.state.conn
-    session_id = request.state.session_id
 
-    diag = conn.execute(
-        f"""
-        SELECT
-            items.id IS NOT NULL as item_exists,
-            items.name as current_name,
-            o.id IS NOT NULL as olympiad_exists
-        FROM (SELECT 1) dummy
-        LEFT JOIN {items} items ON items.id = ?
-        LEFT JOIN olympiads o ON o.id = ?
-        """,
-        (item_id, selected_olympiad_id)
+    item = conn.execute(
+        f"SELECT * FROM {entities} WHERE id = ?",
+        (entity_id,)
     ).fetchone()
 
-    if not diag["olympiad_exists"]:
-        response = templates.TemplateResponse(request, "olympiad_not_found.html")
-        response.headers["HX-Retarget"] = "#main-content"
-        response.headers["HX-Reswap"] = "innerHTML"
-        trigger_badge_update(response)
-        return response
-
-    if not diag["item_exists"]:
+    if not item:
         html_content = templates.get_template("entity_deleted_oob.html").render()
         response = HTMLResponse(html_content)
-        response.headers["HX-Retarget"] = f"#{items}-{item_id}"
+        response.headers["HX-Retarget"] = f"#{entities}-{entity_id}"
         response.headers["HX-Reswap"] = "outerHTML"
-        return response
-        
-    if diag["current_name"] != item_name:
-        item = {"id": item_id, "name": diag["current_name"], "version": diag["current_version"]}
+        return False, response
+
+    if item["name"] != entity_name:
+        item_data = {"id": entity_id, "name": item["name"], "version": item["version"]}
         html_content = templates.get_template("entity_renamed_oob.html").render(
-            item=item, entities=items, hx_target="#main-content"
+            item=item_data, entities=entities, hx_target="#main-content"
         )
         response = HTMLResponse(html_content)
-        response.headers["HX-Retarget"] = f"#{items}-{item_id}"
+        response.headers["HX-Retarget"] = f"#{entities}-{entity_id}"
         response.headers["HX-Reswap"] = "outerHTML"
-        return response
+        return False, response
+
+    return True, None
 
 
-# TODO: diagnose_event_noop (as diagnose_entity_noop) must check if the problem is the version
 def diagnose_event_noop(
     request: Request,
     event_id: int,
@@ -200,86 +300,6 @@ def diagnose_event_noop(
     response.headers["HX-Reswap"] = "innerHTML"
     return response
 
-
-def diagnose_entity_noop(
-    request: Request,
-    entities: str,
-    entity_id: int,
-    expected_version: int,
-    olympiad_id: int,
-    session_id: str,
-    conn,
-    replay_method: str,
-    replay_url: str,
-    replay_vals: dict,
-) -> Response:
-    """
-    Diagnose why an entity operation was a no-op.
-
-    Checks: entity deleted, olympiad deleted (cascade), version mismatch, or not authorized.
-    """
-    diag = conn.execute(
-        f"""
-        SELECT
-          e.id IS NOT NULL as entity_exists,
-          e.version as current_version,
-          e.name as current_name,
-          o.id IS NOT NULL as olympiad_exists,
-          soa.session_id IS NOT NULL as is_authorized
-        FROM (SELECT 1) dummy
-        LEFT JOIN {entities} e ON e.id = ?
-        LEFT JOIN olympiads o ON o.id = ?
-        LEFT JOIN session_olympiad_auth soa
-          ON soa.session_id = ? AND soa.olympiad_id = ?
-        """,
-        (entity_id, olympiad_id, session_id, olympiad_id)
-    ).fetchone()
-
-    # Case 1: Entity doesn't exist
-    if not diag["entity_exists"]:
-        # Check if olympiad was also deleted (cascade delete)
-        if not diag["olympiad_exists"]:
-            response = templates.TemplateResponse(request, "olympiad_not_found.html")
-            response.headers["HX-Retarget"] = "#main-content"
-            response.headers["HX-Reswap"] = "innerHTML"
-            trigger_badge_update(response)
-            return response
-
-        # Just the entity was deleted
-        html_content = templates.get_template("entity_deleted_oob.html").render()
-        response = HTMLResponse(html_content)
-        response.headers["HX-Retarget"] = f"#{entities}-{entity_id}"
-        response.headers["HX-Reswap"] = "outerHTML"
-        return response
-
-    # Case 2: Version mismatch - entity was modified
-    if diag["current_version"] != expected_version:
-        item = {"id": entity_id, "name": diag["current_name"], "version": diag["current_version"]}
-        html_content = templates.get_template("entity_renamed_oob.html").render(
-            item=item, entities=entities, hx_target="#main-content"
-        )
-        response = HTMLResponse(html_content)
-        response.headers["HX-Retarget"] = f"#{entities}-{entity_id}"
-        response.headers["HX-Reswap"] = "outerHTML"
-        return response
-
-    # Case 3: Not authorized - show PIN modal
-    response = templates.TemplateResponse(
-        request,
-        "pin_modal.html",
-        {
-            "action": "/api/validate_pin",
-            "params": {
-                "replay_method": replay_method,
-                "replay_url": replay_url,
-                "replay_vals": json.dumps(replay_vals),
-                "olympiad_id": olympiad_id,
-            },
-        }
-    )
-    response.headers["HX-Retarget"] = "#modal-container"
-    response.headers["HX-Reswap"] = "innerHTML"
-    return response
 
 
 @asynccontextmanager
@@ -347,59 +367,25 @@ def serve_css():
 
 @app.get("/api/olympiads")
 def list_olympiads(request: Request):
+    res, response = check_selected_olympiad(request)
+    if not res:
+        return response
+
     conn = request.state.conn
-    olympiad_data = get_olympiad_from_request(request)
-
-    # Make sure the olympiad the user selected still exists and has not changed the name
-    response_created = False
-    if olympiad_data:
-        selected_olympiad = conn.execute(
-            "SELECT id, name, version FROM olympiads WHERE id = ?",
-            (olympiad_data["id"],)
-        ).fetchone()
-
-        if not selected_olympiad:
-            response_created = True
-            response_html = templates.get_template("olympiad_not_found.html").render()
-            response = HTMLResponse(response_html)
-            response.headers["HX-Retarget"] = "#modal-container"
-            response.headers["HX-Reswap"] = "innerHTML"
-        elif selected_olympiad["name"] != olympiad_data["name"]:
-            response_created = True
-            response_html = templates.get_template("olympiad_name_changed.html").render()
-            response_html += templates.get_template("olympiad_badge.html").render(
-                olympiad = {
-                    "id": selected_olympiad["id"],
-                    "version": selected_olympiad["version"],
-                    "name": selected_olympiad["name"]
-                },
-                oob=True
-            )
-            response = HTMLResponse(response_html)
-            response.headers["HX-Retarget"] = "#modal-container"
-            response.headers["HX-Reswap"] = "innerHTML"
-
-    if not response_created:
-        cursor = conn.execute("SELECT id, name, version FROM olympiads")
-        rows = [
-            {
-                "id": row["id"],
-                "name": row["name"],
-                "version": row["version"]
-            }
-            for row in cursor.fetchall()
-        ]
-        response = templates.TemplateResponse(
-            request,
-            "entity_list.html",
-            {
-                "entities": "olympiads",
-                "placeholder": "Tusorella",
-                "items": rows
-            }
-        )
-    
-    return response
+    cursor = conn.execute("SELECT id, name, version FROM olympiads")
+    rows = [
+        { "id": row["id"], "name": row["name"], "version": row["version"] }
+        for row in cursor.fetchall()
+    ]
+    return templates.TemplateResponse(
+        request,
+        "entity_list.html",
+        {
+            "entities": "olympiads",
+            "placeholder": "Tusorella",
+            "items": rows
+        }
+    )
 
 
 @app.get("/api/olympiads/create")
@@ -449,7 +435,7 @@ def create_olympiad(request: Request, pin: str = Form(...), name: str = Form(...
     )
     conn.commit()
 
-    item = {"id": olympiad_id, "name": name, "version": 1}
+    item = { "id": olympiad_id, "name": name }
     response = HTMLResponse(
         templates.get_template("entity_element.html").render(
             item=item, entities="olympiads", hx_target="#olympiad-badge"
@@ -479,46 +465,40 @@ def select_olympiad(
 
         olympiad_data = get_olympiad_from_request(request)
         if olympiad_data and olympiad_data["id"] == olympiad_id:
-            html_content += '<div id="olympiad-badge" hx-swap-oob="true">Olympiad badge</div>'
+            html_content += templates.get_template(
+                "olympiad_badge.html"
+            ).render(olympiad=sentinel_olympiad_badge, oob=True)
 
         response = HTMLResponse(html_content)
         response.headers["HX-Retarget"] = f"#olympiads-{olympiad_id}"
-        response.headers["HX-Reswap"] = "outerHTML"
-        return response
-
-    if olympiad["name"] != olympiad_name:
+        # response.headers["HX-Reswap"] = "outerHTML"
+    elif olympiad["name"] != olympiad_name:
         item = {"id": olympiad_id, "name": olympiad["name"], "version": olympiad["version"]}
         entity_html = templates.get_template("entity_renamed_oob.html").render(
             item=item, entities="olympiads", hx_target="#olympiad-badge"
         )
         olympiad_data = get_olympiad_from_request(request)
         if olympiad_data and olympiad_data["id"] == olympiad_id:
-            entity_html += templates.get_template("olympiad_badge.html").render(
-                olympiad={
-                    "id": olympiad_id,
-                    "name": olympiad["name"],
-                    "version": olympiad["version"]
-                },
-                oob=True
-            )
+            olympiad_badge = {"id": olympiad_id, "name": olympiad["name"], "version": olympiad["version"]}
+            entity_html += templates.get_template("olympiad_badge.html").render(olympiad=olympiad_badge, oob=True)
         response = HTMLResponse(entity_html)
         response.headers["HX-Retarget"] = f"#olympiads-{olympiad_id}"
-        response.headers["HX-Reswap"] = "outerHTML"
-        return response
-
-    response = templates.TemplateResponse(
-        request,
-        "olympiad_badge.html",
-        {
-            "olympiad":
+        # response.headers["HX-Reswap"] = "outerHTML"
+    else:
+        response = templates.TemplateResponse(
+            request,
+            "olympiad_badge.html",
             {
-                "id": olympiad["id"],
-                "name": olympiad["name"],
-                "version": olympiad["version"]
+                "olympiad":
+                {
+                    "id": olympiad["id"],
+                    "name": olympiad["name"],
+                    "version": olympiad["version"]
+                }
             }
-        }
-    )
-    response.headers["HX-Reswap"] = "outerHTML"
+        )
+
+    # response.headers["HX-Reswap"] = "outerHTML"
     return response
 
 
@@ -554,225 +534,75 @@ def rename_olympiad(
     olympiad_new_name: str = Form(..., alias="new_name")
 ):
     conn = request.state.conn
-    session_id = request.state.session_id
 
     conn.execute("BEGIN IMMEDIATE")
 
-    success = True
-    if verify_olympiad_access(conn, session_id, olympiad_id):
-        # User is allowed to modify the olympiad name
-        try:
-            updated_row = conn.execute(
-                """
-                UPDATE olympiads
-                SET name = ?, version = version + 1
-                WHERE id = ? AND name = ?
-                RETURNING id, name, version""",
-                (olympiad_new_name, olympiad_id, olympiad_curr_name)
-            ).fetchone()
-            if not updated_row:
-                # Someone else changed the name of the olympiad before this user
-                error_row = conn.execute(
-                    """
-                    SELECT id, version, name
-                    FROM olympiads
-                    WHERE id = ?
-                    """,
-                    (olympiad_id,)
-                ).fetchone()
-                item = {"id": olympiad_id, "name": error_row["name"], "version": error_row["version"]}
-                entity_html = templates.get_template(
-                    "entity_renamed_oob.html"
-                ).render(
-                    item=item, entities="olympiads", hx_target="#olympiad-badge"
-                )
-                # If this olympiad is the one currently selected, also update the badge via OOB swap
-                olympiad_data = get_olympiad_from_request(request)
-                if olympiad_data and olympiad_data["id"] == olympiad_id:
-                    entity_html += templates.get_template("olympiad_badge.html").render(
-                        olympiad={
-                            "id": olympiad_id,
-                            "name": error_row["name"],
-                            "version": error_row["version"]
-                        },
-                        oob=True
-                    )
-                response = HTMLResponse(entity_html)
-                response.headers["HX-Retarget"] = f"#olympiads-{olympiad_id}"
-                response.headers["HX-Reswap"] = "outerHTML"
-            else:
-                # Renaming of the olympiad has succeded in the database:
-                # render the new entity element of the frontend
-                entity_html = templates.get_template(
-                    "entity_element.html"
-                ).render(
-                    item={
-                        "id": olympiad_id,
-                        "name": updated_row["name"]
-                    },
-                    entities="olympiads",
-                    hx_target="#olympiad-badge"
-                )
-                # If this olympiad is the one currently selected, also update the badge via OOB swap
-                olympiad_data = get_olympiad_from_request(request)
-                if olympiad_data and olympiad_data["id"] == olympiad_id:
-                    entity_html += templates.get_template("olympiad_badge.html").render(
-                        olympiad={
-                            "id": olympiad_id,
-                            "name": updated_row["name"],
-                            "version": updated_row["version"]
-                        },
-                        oob=True
-                    )
-                response = HTMLResponse(entity_html)
-                response.headers["HX-Retarget"] = f"#olympiads-{olympiad_id}"
-                response.headers["HX-Reswap"] = "outerHTML"
-        except sqlite3.IntegrityError:
-            success = False
-            response = HTMLResponse(templates.get_template("olympiad_name_duplicate.html").render())
-            response.headers["HX-Retarget"] = "#modal-container"
-            response.headers["HX-Reswap"] = "innerHTML"
-    else:
-        # Olympiad does not exist or the user is not authorized to modify stuff in this olympiad
-        success = False
-        olympiad_exists = conn.execute(
-            "SELECT 1 FROM olympiads WHERE id = ?", (olympiad_id,)
-        ).fetchone()
-
-        if not olympiad_exists:
-            html_content = templates.get_template("entity_deleted_oob.html").render()
-
-            # If this was the selected olympiad, reset the badge via OOB
-            olympiad_data = get_olympiad_from_request(request)
-            if olympiad_data and olympiad_data["id"] == olympiad_id:
-                html_content += '<div id="olympiad-badge" hx-swap-oob="true">Olympiad badge</div>'
-
-            response = HTMLResponse(html_content)
-            response.headers["HX-Retarget"] = f"#olympiads-{olympiad_id}"
-            response.headers["HX-Reswap"] = "outerHTML"
-        else:
-            # Olympiad exists but not authorized - show PIN modal
-            response = templates.TemplateResponse(
-                request, "pin_modal.html", {
-                    "action": "/api/validate_pin",
-                    "params": {
-                        "replay_method": "put",
-                        "replay_url": f"/api/olympiads/{olympiad_id}",
-                        "replay_vals": json.dumps({
-                            "curr_name": olympiad_curr_name,
-                            "new_name": olympiad_new_name,
-                        }),
-                        "olympiad_id": olympiad_id,
-                    },
-                }
-            )
-            response.headers["HX-Retarget"] = "#modal-container"
-            response.headers["HX-Reswap"] = "innerHTML"
-
-    if success:
-        conn.commit()
-    else:
+    replay_vals = {"curr_name": olympiad_curr_name, "new_name": olympiad_new_name}
+    res, response = check_olympiad_auth(request, olympiad_id, olympiad_curr_name, replay_vals)
+    if not res:
         conn.rollback()
+        return response
 
-    return response
+    try:
+        updated_row = conn.execute(
+            """
+            UPDATE olympiads
+            SET name = ?, version = version + 1
+            WHERE id = ?
+            RETURNING id, name, version""",
+            (olympiad_new_name, olympiad_id)
+        ).fetchone()
+        entity_html = templates.get_template(
+            "entity_element.html"
+        ).render(
+            item={"id": olympiad_id, "name": updated_row["name"]},
+            entities="olympiads",
+            hx_target="#olympiad-badge"
+        )
+        entity_html += _oob_badge_html(
+            request,
+            olympiad_id,
+            {
+                "id": olympiad_id,
+                "name": updated_row["name"],
+                "version": updated_row["version"]
+            }
+        )
+        response = HTMLResponse(entity_html)
+        response.headers["HX-Retarget"] = f"#olympiads-{olympiad_id}"
+        response.headers["HX-Reswap"] = "outerHTML"
+        conn.commit()
+        return response
+    except sqlite3.IntegrityError:
+        conn.rollback()
+        response = HTMLResponse(templates.get_template("olympiad_name_duplicate.html").render())
+        response.headers["HX-Retarget"] = "#modal-container"
+        response.headers["HX-Reswap"] = "innerHTML"
+        return response
 
 
 @app.delete("/api/olympiads/{olympiad_id}")
-def delete_olympiad(
-    request: Request,
-    olympiad_id: int,
-    olympiad_name: str = Query(..., alias="name")
-):
+def delete_olympiad(request: Request, olympiad_id: int, olympiad_name: str = Query(..., alias="name")):
     conn = request.state.conn
-    session_id = request.state.session_id
 
     conn.execute("BEGIN IMMEDIATE")
 
-    success = True
-    if verify_olympiad_access(conn, session_id, olympiad_id):
-        deleted_row = conn.execute(
-            "DELETE FROM olympiads WHERE id = ? AND name = ? RETURNING id",
-            (olympiad_id, olympiad_name)
-        ).fetchone()
-        if not deleted_row:
-            # Someone else renamed the olympiad before this user deleted it
-            error_row = conn.execute(
-                """
-                SELECT id, version, name FROM olympiads WHERE id = ?
-                """,
-                (olympiad_id,)
-            ).fetchone()
-            item = {"id": olympiad_id, "name": error_row["name"], "version": error_row["version"]}
-            entity_html = templates.get_template(
-                "entity_renamed_oob.html"
-            ).render(
-                item=item, entities="olympiads", hx_target="#olympiad-badge"
-            )
-            # If this olympiad is the one currently selected, also update the badge via OOB swap
-            olympiad_data = get_olympiad_from_request(request)
-            if olympiad_data and olympiad_data["id"] == olympiad_id:
-                entity_html += templates.get_template("olympiad_badge.html").render(
-                    olympiad={
-                        "id": olympiad_id,
-                        "name": error_row["name"],
-                        "version": error_row["version"]
-                    },
-                    oob=True
-                )
-            response = HTMLResponse(entity_html)
-            response.headers["HX-Retarget"] = f"#olympiads-{olympiad_id}"
-            response.headers["HX-Reswap"] = "outerHTML"
-        else:
-            # Deletion succeeded
-            html_content = templates.get_template("entity_delete.html").render()
-
-            # If this olympiad is the one currently selected, also reset the badge via OOB swap
-            olympiad_data = get_olympiad_from_request(request)
-            if olympiad_data and olympiad_data["id"] == olympiad_id:
-                html_content += '<div id="olympiad-badge" hx-swap-oob="true">Olympiad badge</div>'
-
-            response = HTMLResponse(html_content)
-            response.headers["HX-Retarget"] = f"#olympiads-{olympiad_id}"
-            response.headers["HX-Reswap"] = "outerHTML"
-    else:
-        # Olympiad does not exist or the user is not authorized to modify stuff in this olympiad
-        success = False
-        olympiad_exists = conn.execute(
-            "SELECT 1 FROM olympiads WHERE id = ?", (olympiad_id,)
-        ).fetchone()
-
-        if not olympiad_exists:
-            html_content = templates.get_template("entity_deleted_oob.html").render()
-
-            # If this was the selected olympiad, reset the badge via OOB
-            olympiad_data = get_olympiad_from_request(request)
-            if olympiad_data and olympiad_data["id"] == olympiad_id:
-                html_content += '<div id="olympiad-badge" hx-swap-oob="true">Olympiad badge</div>'
-
-            response = HTMLResponse(html_content)
-            response.headers["HX-Retarget"] = f"#olympiads-{olympiad_id}"
-            response.headers["HX-Reswap"] = "outerHTML"
-        else:
-            # Olympiad exists but not authorized - show PIN modal
-            response = templates.TemplateResponse(
-                request, "pin_modal.html", {
-                    "action": "/api/validate_pin",
-                    "params": {
-                        "replay_method": "delete",
-                        "replay_url": f"/api/olympiads/{olympiad_id}?name={olympiad_name}",
-                        "replay_vals": json.dumps({}),
-                        "olympiad_id": olympiad_id,
-                    },
-                }
-            )
-            response.headers["HX-Retarget"] = "#modal-container"
-            response.headers["HX-Reswap"] = "innerHTML"
-
-    if success:
-        conn.commit()
-    else:
+    res, response = check_olympiad_auth(request, olympiad_id, olympiad_name)
+    if not res:
         conn.rollback()
+        return response
 
+    conn.execute(
+        "DELETE FROM olympiads WHERE id = ? AND name = ? RETURNING id",
+        (olympiad_id, olympiad_name)
+    ).fetchone()
+
+    html_content = templates.get_template("entity_delete.html").render()
+    html_content += _oob_badge_html(request, olympiad_id, sentinel_olympiad_badge)
+    response = HTMLResponse(html_content)
+    response.headers["HX-Retarget"] = f"#olympiads-{olympiad_id}"
+    response.headers["HX-Reswap"] = "outerHTML"
+    conn.commit()
     return response
 
 # ---------------------------------------------------------------------------
@@ -781,50 +611,39 @@ def delete_olympiad(
 
 @app.get("/api/events/{event_id}")
 def select_event(request: Request, event_id: int, event_name: str = Query(..., alias="name")):
+    res, response = check_required_olympiad(request, "events")
+    if not res:
+        return response
+
+    res, response = check_entity(request, "events", event_id, event_name)
+    if not res:
+        return response
+
     conn = request.state.conn
-    session_id = request.state.session_id
-    olympiad_data = get_olympiad_from_request(request)
-    selected_olympiad_id = olympiad_data["id"] if olympiad_data else None
-
-    # TODO: I also check that the olympiad name as not changed with respect to the last one the user
-    #       has seen
-    event = conn.execute(
-        """
-        SELECT id, name, version, current_stage_order, score_kind
-        FROM events
-        WHERE id = ? AND name = ? AND olympiad_id = ?""",
-        (event_id, event_name, selected_olympiad_id)
+    max_stage = conn.execute(
+        "SELECT MAX(stage_order) AS max_order FROM event_stages WHERE event_id = ?",
+        (event_id,)
     ).fetchone()
+    max_stage_order = max_stage["max_order"] if max_stage else None
 
-    if event:
-        max_stage = conn.execute(
-            "SELECT MAX(stage_order) AS max_order FROM event_stages WHERE event_id = ?",
-            (event_id,)
-        ).fetchone()
-        max_stage_order = max_stage["max_order"] if max_stage else None
+    event = conn.execute(
+        "SELECT id, name, version, current_stage_order, score_kind FROM events WHERE id = ?",
+        (event_id,)
+    ).fetchone()
+    event_status = derive_event_status(event["current_stage_order"], max_stage_order)
 
-        event_status = derive_event_status(event["current_stage_order"], max_stage_order)
-
-        return templates.TemplateResponse(
-            request,
-            "event_page.html",
-            {
-                "event": {
-                    "id": event["id"],
-                    "name": event["name"],
-                    "version": event["version"],
-                    "status": event_status,
-                },
-            }
-        )
-    else:
-        return diagnose_select_item_noop(
-            request,
-            "events",
-            event_id,
-            event_name,
-            selected_olympiad_id
-        )
+    return templates.TemplateResponse(
+        request,
+        "event_page.html",
+        {
+            "event": {
+                "id": event["id"],
+                "name": event["name"],
+                "version": event["version"],
+                "status": event_status,
+            },
+        }
+    )
 
 
 @app.get("/api/events/{event_id}/players")
@@ -835,14 +654,12 @@ def get_event_players(request: Request, event_id: int):
 
     enrolled_participants = conn.execute(
         """
-        SELECT DISTINCT p.id, COALESCE(pl.name, t.name) AS name
-        FROM participants p
+        SELECT ep.participant_id AS id, COALESCE(pl.name, t.name) AS name
+        FROM event_participants ep
+        JOIN participants p ON p.id = ep.participant_id
         LEFT JOIN players pl ON pl.id = p.player_id
         LEFT JOIN teams t ON t.id = p.team_id
-        JOIN group_participants gp ON gp.participant_id = p.id
-        JOIN groups g ON g.id = gp.group_id
-        JOIN event_stages es ON es.id = g.event_stage_id
-        WHERE es.event_id = ?
+        WHERE ep.event_id = ?
         ORDER BY name
         """,
         (event_id,)
@@ -860,7 +677,9 @@ def get_event_players(request: Request, event_id: int):
         """,
         (olympiad_id,)
     ).fetchall()
-    available_participants = [p for p in all_participants if p["id"] not in enrolled_ids]
+    available_participants = [
+        p for p in all_participants if p["id"] not in enrolled_ids
+    ]
 
     return templates.TemplateResponse(
         request, "event_players_section_v2.html",
@@ -937,14 +756,14 @@ def resize_stage_groups(
 ):
     conn = request.state.conn
 
-    # TODO: check that teh user is authorized to resize the stage group
-    #       this check must always include a check on the version number in the events table
+    # TODO: check that teh user is authorized to resize the stage group
+    #       this check must always include a check on the version number in the events table
     #       if that has changed (for whatever reason!) the user must not change anything
     #       it must first reload the page so that he have the up-to-date content
     #       so a pop-up must ask the user to reload the page, this can be the usual catch all (at leat for now)
     #       then we will think to have one specific to reload the event page the user was working on
     #       If I want to use verify_event_access for this it means verify_event_access must also always check
-    #       the version number of the event
+    #       the version number of the event
 
     event_row = conn.execute(
         "SELECT current_stage_order FROM events WHERE id = ?", (event_id,)
@@ -983,115 +802,73 @@ def resize_stage_groups(
 
 
 # ---------------------------------------------------------------------------
-# Entity helpers — shared logic
+# Entity helpers - shared logic
 # ---------------------------------------------------------------------------
 
-def _list_entities(request: Request, entities: str, conn):
-    olympiad_data = get_olympiad_from_request(request)
-
-    # Case 1: No olympiad selected
-    if not olympiad_data:
-        return templates.TemplateResponse(
-            request, "select_olympiad_required.html", {"message": select_olympiad_message[entities]}
-        )
-
-    olympiad_id = olympiad_data["id"]
-    olympiad_version = olympiad_data["version"]
-
-    # Check that the olympiad still exists and hasn't been renamed
-    olympiad = conn.execute(
-        "SELECT id, name, version FROM olympiads WHERE id = ?",
-        (olympiad_id,)
-    ).fetchone()
-
-    # Case 2: Olympiad was deleted
-    if not olympiad:
-        response = templates.TemplateResponse(request, "olympiad_not_found.html")
-        trigger_badge_update(response)
+def _list_entities(request: Request, entities: str):
+    res, response = check_required_olympiad(request, entities)
+    if not res:
         return response
 
-    # Case 3: Olympiad version mismatch (was renamed)
-    if olympiad["version"] != olympiad_version:
-        response = templates.TemplateResponse(
-            request, "olympiad_name_changed.html",
-            {"olympiad_name": olympiad["name"]}
-        )
-        trigger_badge_update(response)
-        return response
-
-    # Fetch entities for this olympiad
+    conn = request.state.conn
+    olympiad_id = get_olympiad_from_request(request)["id"]
     items = conn.execute(
         f"SELECT e.id, e.name, e.version FROM {entities} e WHERE e.olympiad_id = ?",
         (olympiad_id,)
     ).fetchall()
-
     placeholder = entity_list_form_placeholder[entities]
     return templates.TemplateResponse(
-        request, "entity_list.html",
-        {"entities": entities, "placeholder": placeholder, "items": items}
+        request,
+        "entity_list.html",
+        {
+            "entities": entities,
+            "placeholder": placeholder,
+            "items": items
+        }
     )
 
 
 def _create_entity(request: Request, entities: str, name: str):
-    conn = request.state.conn
-    session_id = request.state.session_id
     olympiad_data = get_olympiad_from_request(request)
-    olympiad_id = olympiad_data["id"] if olympiad_data else None
+    olympiad_id   = olympiad_data["id"]
 
-    if olympiad_id is None:
-        return templates.TemplateResponse(
-            request,
-            "select_olympiad_required.html",
-            {
-                "message": select_olympiad_message[entities]
-            }
-        )
+    if olympiad_id == 0:
+        return templates.TemplateResponse(request, "select_olympiad_required.html")
 
+
+    res, response = check_olympiad_auth(request, replay_vals={"name": name})
+    if not res:
+        return response
+
+    conn = request.state.conn
     if entities == "events":
         insert_sql = f"""
             INSERT INTO {entities} (name, olympiad_id, score_kind)
-            SELECT ?, ?, 'points'
-            WHERE EXISTS (
-                SELECT 1 FROM session_olympiad_auth
-                WHERE session_id = ? AND olympiad_id = ?
-            )
+            VALUES (?, ?, 'points')
             RETURNING id, name, version
             """
     else:
         insert_sql = f"""
             INSERT INTO {entities} (name, olympiad_id)
-            SELECT ?, ?
-            WHERE EXISTS (
-                SELECT 1 FROM session_olympiad_auth
-                WHERE session_id = ? AND olympiad_id = ?
-            )
+            VALUES (?, ?)
             RETURNING id, name, version
             """
-
     try:
         inserted_row = conn.execute(
-            insert_sql,
-            (name, olympiad_id, session_id, olympiad_id)
+            insert_sql, (name, olympiad_id)
         ).fetchone()
-    except sqlite3.IntegrityError:
-        response = HTMLResponse(templates.get_template("entity_name_duplicate.html").render(entities=entities))
-        response.headers["HX-Retarget"] = "#modal-container"
-        response.headers["HX-Reswap"] = "innerHTML"
-        return response
 
-    if inserted_row:
         if entities == "players":
             conn.execute(
-                f"INSERT INTO participants (player_id, team_id) VALUES (?, ?)",
+                "INSERT INTO participants (player_id, team_id) VALUES (?, ?)",
                 (inserted_row["id"], None)
             )
         else:
             conn.execute(
-                f"INSERT INTO participants (player_id, team_id) VALUES (?, ?)",
+                "INSERT INTO participants (player_id, team_id) VALUES (?, ?)",
                 (None, inserted_row["id"])
             )
 
-        conn.commit()
         item = {"id": inserted_row["id"], "name": inserted_row["name"], "version": inserted_row["version"]}
         html_content = templates.get_template("entity_element.html").render(
             item=item, entities=entities, hx_target="#main-content"
@@ -1099,143 +876,143 @@ def _create_entity(request: Request, entities: str, name: str):
         response = HTMLResponse(html_content)
         response.headers["HX-Retarget"] = "#entity-list"
         response.headers["HX-Reswap"] = "afterbegin"
+        conn.commit()
         return response
-
-    # INSERT was a no-op — check if olympiad was deleted or we need auth
-    olympiad_exists = conn.execute(
-        "SELECT id FROM olympiads WHERE id = ?", (olympiad_id,)
-    ).fetchone()
-
-    if not olympiad_exists:
-        response = templates.TemplateResponse(request, "olympiad_not_found.html")
-        response.headers["HX-Retarget"] = "#main-content"
-        response.headers["HX-Reswap"] = "innerHTML"
-        trigger_badge_update(response)
-        return response
-
-    # Not authorized - show PIN modal
-    response = templates.TemplateResponse(
-        request, "pin_modal.html", {
-            "action": "/api/validate_pin",
-            "params": {
-                "replay_method": "post",
-                "replay_url": f"/api/{entities}",
-                "replay_vals": json.dumps({"name": name}),
-                "olympiad_id": olympiad_id,
-            },
-        }
-    )
-    response.headers["HX-Retarget"] = "#modal-container"
-    response.headers["HX-Reswap"] = "innerHTML"
-    return response
-
-
-def _rename_entity(request: Request, entities: str, entity_id: int, name: str, entity_version: int):
-    session_id = request.state.session_id
-    conn = request.state.conn
-    olympiad_data = get_olympiad_from_request(request)
-
-    olympiad_id = olympiad_data["id"] if olympiad_data else None
-
-    try:
-        updated_row = conn.execute(
-            f"""
-            UPDATE {entities}
-            SET name = ?, version = version + 1
-            WHERE id = ?
-              AND version = ?
-              AND olympiad_id = ?
-              AND EXISTS (
-                SELECT 1 FROM session_olympiad_auth
-                WHERE session_id = ? AND olympiad_id = ?
-              )
-            RETURNING id, name, version
-            """,
-            (name, entity_id, entity_version, olympiad_id, session_id, olympiad_id)
-        ).fetchone()
     except sqlite3.IntegrityError:
+        conn.rollback()
         response = HTMLResponse(templates.get_template("entity_name_duplicate.html").render(entities=entities))
         response.headers["HX-Retarget"] = "#modal-container"
         response.headers["HX-Reswap"] = "innerHTML"
         return response
 
-    if updated_row:
-        conn.commit()
-        item = {"id": entity_id, "name": updated_row["name"], "version": updated_row["version"]}
-        html_content = templates.get_template("entity_element.html").render(
-            item=item, entities=entities, hx_target="#main-content"
-        )
 
-        response = HTMLResponse(html_content)
-        response.headers["HX-Retarget"] = f"#{entities}-{entity_id}"
-        response.headers["HX-Reswap"] = "outerHTML"
+def _rename_entity(
+    request: Request,
+    entities: str,
+    entity_id: int,
+    entity_curr_name: str,
+    entity_new_name: str
+):
+    olympiad_data = get_olympiad_from_request(request)
+    olympiad_id = olympiad_data["id"]
+    olympiad_name = olympiad_data["name"]
+
+    replay_vals = {"curr_name": entity_curr_name, "new_name": entity_new_name}
+    res, response = check_olympiad_auth(request, olympiad_id, olympiad_name, replay_vals=replay_vals)
+    if not res: return response
+
+    conn = request.state.conn
+    try:
+        updated_row = conn.execute(
+            f"""
+            UPDATE {entities}
+            SET name = ?, version = version + 1
+            WHERE id = ? AND name = ? AND olympiad_id = ?
+            RETURNING id, name, version
+            """,
+            (entity_new_name, entity_id, entity_curr_name, olympiad_id)
+        ).fetchone()
+        if not updated_row:
+            conn.rollback()
+            # Entity was deleted or renamed by someone else
+            entity = conn.execute(
+                f"SELECT id, name, version FROM {entities} WHERE id = ?",
+                (entity_id,)
+            ).fetchone()
+            if not entity:
+                html_content = templates.get_template("entity_deleted_oob.html").render()
+                response = HTMLResponse(html_content)
+                response.headers["HX-Retarget"] = f"#{entities}-{entity_id}"
+                response.headers["HX-Reswap"] = "outerHTML"
+            else:
+                item = {"id": entity_id, "name": entity["name"], "version": entity["version"]}
+                html_content = templates.get_template("entity_renamed_oob.html").render(
+                    item=item, entities=entities, hx_target="#main-content"
+                )
+                response = HTMLResponse(html_content)
+                response.headers["HX-Retarget"] = f"#{entities}-{entity_id}"
+                response.headers["HX-Reswap"] = "outerHTML"
+            return response
+        else:
+            item = {"id": entity_id, "name": updated_row["name"], "version": updated_row["version"]}
+            html_content = templates.get_template("entity_element.html").render(
+                item=item, entities=entities, hx_target="#main-content"
+            )
+            response = HTMLResponse(html_content)
+            response.headers["HX-Retarget"] = f"#{entities}-{entity_id}"
+            response.headers["HX-Reswap"] = "outerHTML"
+            conn.commit()
+            return response
+    except sqlite3.IntegrityError:
+        conn.rollback()
+        response = HTMLResponse(templates.get_template("entity_name_duplicate.html").render(entities=entities))
+        response.headers["HX-Retarget"] = "#modal-container"
+        response.headers["HX-Reswap"] = "innerHTML"
         return response
 
-    return diagnose_entity_noop(
-        request,
-        entities,
-        entity_id,
-        entity_version,
-        olympiad_id,
-        session_id,
-        conn,
-        replay_method="put",
-        replay_url=f"/api/{entities}/{entity_id}",
-        replay_vals={"name": name, "version": entity_version},
-    )
 
-
-def _delete_entity(request: Request, entities: str, entity_id: int, entity_version: int, conn):
-    session_id = request.state.session_id
+def _delete_entity(request: Request, entities: str, entity_id: int, entity_name: str):
     olympiad_data = get_olympiad_from_request(request)
-    olympiad_id = olympiad_data["id"] if olympiad_data else None
+    olympiad_id = olympiad_data["id"]
+    olympiad_name = olympiad_data["name"]
 
+    res, response = check_olympiad_auth(request, olympiad_id, olympiad_name)
+    if not res: return response
+
+    conn = request.state.conn
     deleted_row = conn.execute(
         f"""
         DELETE FROM {entities}
-        WHERE id = ?
-          AND version = ?
-          AND olympiad_id = ?
-          AND EXISTS (
-            SELECT 1 FROM session_olympiad_auth
-            WHERE session_id = ? AND olympiad_id = ?
-          )
+        WHERE id = ? AND name = ? AND olympiad_id = ?
         RETURNING id
         """,
-        (entity_id, entity_version, olympiad_id, session_id, olympiad_id)
+        (entity_id, entity_name, olympiad_id)
     ).fetchone()
-
-    if deleted_row:
-        conn.commit()
+    if not deleted_row:
+        conn.rollback()
+        # Entity was deleted or renamed by someone else
+        entity = conn.execute(
+            f"SELECT id, name, version FROM {entities} WHERE id = ?",
+            (entity_id,)
+        ).fetchone()
+        if not entity:
+            html_content = templates.get_template("entity_deleted_oob.html").render()
+            response = HTMLResponse(html_content)
+            response.headers["HX-Retarget"] = f"#{entities}-{entity_id}"
+            response.headers["HX-Reswap"] = "outerHTML"
+        else:
+            item = {"id": entity_id, "name": entity["name"], "version": entity["version"]}
+            html_content = templates.get_template("entity_renamed_oob.html").render(
+                item=item, entities=entities, hx_target="#main-content"
+            )
+            response = HTMLResponse(html_content)
+            response.headers["HX-Retarget"] = f"#{entities}-{entity_id}"
+            response.headers["HX-Reswap"] = "outerHTML"
+        return response
+    else:
         html_content = templates.get_template("entity_delete.html").render()
         response = HTMLResponse(html_content)
         response.headers["HX-Retarget"] = f"#{entities}-{entity_id}"
         response.headers["HX-Reswap"] = "outerHTML"
+        conn.commit()
         return response
-
-    return diagnose_entity_noop(
-        request, entities, entity_id, entity_version, olympiad_id, session_id, conn,
-        replay_method="delete",
-        replay_url=f"/api/{entities}/{entity_id}?version={entity_version}",
-        replay_vals={},
-    )
 
 
 # ---------------------------------------------------------------------------
-# Explicit entity routes — players, teams, events, edit/cancel-edit
+# Explicit entity routes - players, teams, events, edit/cancel-edit
 # ---------------------------------------------------------------------------
 
 @app.get("/api/players")
 def list_players(request: Request):
-    return _list_entities(request, "players", request.state.conn)
+    return _list_entities(request, "players")
 
 @app.get("/api/teams")
 def list_teams(request: Request):
-    return _list_entities(request, "teams", request.state.conn)
+    return _list_entities(request, "teams")
 
 @app.get("/api/events")
 def list_events(request: Request):
-    return _list_entities(request, "events", request.state.conn)
+    return _list_entities(request, "events")
 
 @app.post("/api/players")
 def create_player(request: Request, name: str = Form(...)):
@@ -1247,85 +1024,40 @@ def create_team(request: Request, name: str = Form(...)):
 
 @app.post("/api/events")
 def create_event(request: Request, name: str = Form(...)):
-    conn = request.state.conn
-    session_id = request.state.session_id
     olympiad_data = get_olympiad_from_request(request)
-    olympiad_id = olympiad_data["id"] if olympiad_data else None
-    olympiad_name = olympiad_data["name"] if olympiad_data else None
+    olympiad_id = olympiad_data["id"]
+    olympiad_name = olympiad_data["name"]
 
-    conn.execute("BEGIN IMMEDIATE")
-
-    if not verify_olympiad_access(conn, session_id, olympiad_id, olympiad_name):
-        conn.rollback()
-
-        # Diagnose why
-        olympiad = conn.execute(
-            "SELECT id, name, version FROM olympiads WHERE id = ?", (olympiad_id,)
-        ).fetchone()
-
-        if not olympiad:
-            response = templates.TemplateResponse(request, "olympiad_not_found.html")
-            response.headers["HX-Retarget"] = "#main-content"
-            response.headers["HX-Reswap"] = "innerHTML"
-            trigger_badge_update(response)
-            return response
-
-        if olympiad["name"] != olympiad_name:
-            response = templates.TemplateResponse(
-                request,
-                "olympiad_name_changed.html",
-                {
-                    "olympiad_name": olympiad["name"],
-                }
-            )
-            response.headers["HX-Retarget"] = "#main-content"
-            response.headers["HX-Reswap"] = "innerHTML"
-            trigger_badge_update(response)
-            return response
-
-        # Not authorized — show PIN modal
-        response = templates.TemplateResponse(
-            request,
-            "pin_modal.html",
-            {
-                "action": "/api/validate_pin",
-                "params": {
-                    "replay_method": "post",
-                    "replay_url": "/api/events",
-                    "replay_vals": json.dumps({"name": name}),
-                    "olympiad_id": olympiad_id,
-                },
-            }
-        )
-        response.headers["HX-Retarget"] = "#modal-container"
-        response.headers["HX-Reswap"] = "innerHTML"
+    res, response = check_olympiad_auth(request, olympiad_id, olympiad_name, replay_vals={"name": name})
+    if not res:
         return response
 
-    # Access verified — insert while still holding the write lock
+    conn = request.state.conn
     try:
         row = conn.execute(
             "INSERT INTO events (name, olympiad_id, score_kind) VALUES (?, ?, 'points') RETURNING id, name, version",
             (name, olympiad_id)
         ).fetchone()
+        response = templates.TemplateResponse(
+            request,
+            "event_page.html",
+            {
+                "event": {
+                    "id": row["id"],
+                    "name": row["name"],
+                    "version": row["version"],
+                    "status": "registration",
+                },
+            }
+        )
+        conn.commit()
+        return response
     except sqlite3.IntegrityError:
         conn.rollback()
         response = HTMLResponse(templates.get_template("entity_name_duplicate.html").render(entities="events"))
         response.headers["HX-Retarget"] = "#modal-container"
         response.headers["HX-Reswap"] = "innerHTML"
         return response
-
-    conn.commit()
-    return templates.TemplateResponse(
-        request, "event_page.html",
-        {
-            "event": {
-                "id": row["id"],
-                "name": row["name"],
-                "version": row["version"],
-                "status": "registration",
-            },
-        }
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -1370,11 +1102,7 @@ def update_event_score_kind(request: Request, event_id: int, score_kind: str = F
 
 
 @app.get("/api/events/{event_id}/setup")
-def get_event_setup(
-    request: Request,
-    event_id: int,
-    version: int = Query(...)
-):
+def get_event_setup(request: Request, event_id: int, version: int = Query(...)):
     conn = request.state.conn
     session_id = request.state.session_id
 
@@ -1423,10 +1151,18 @@ def add_event_stage(request: Request, event_id: int, kind: str = Form(...)):
         (event_id,)
     ).fetchone()["m"]
 
-    conn.execute(
-        "INSERT INTO event_stages (event_id, kind, stage_order) VALUES (?, ?, ?)",
-        (event_id, kind, max_order + 1)
-    )
+    stage_order = max_order + 1
+    stage_id = conn.execute(
+        "INSERT INTO event_stages (event_id, kind, stage_order) VALUES (?, ?, ?) RETURNING id",
+        (event_id, kind, stage_order)
+    ).fetchone()["id"]
+
+    if stage_order == 1:
+        if kind == "groups":
+            events.generate_groups_stage(conn, stage_id, 1)
+        elif kind == "single_elimination":
+            events.generate_single_elimination_stage(conn, stage_id)
+
     conn.commit()
 
     return _render_stages_section(request, conn, event_id)
@@ -1481,7 +1217,10 @@ def enrollv2_participant(request: Request, event_id: int, participant_id: int):
     conn = request.state.conn
 
     conn.execute(
-        "INSERT OR IGNORE INTO event_participants (event_id, participant_id) VALUES (?, ?)",
+        """
+        INSERT OR IGNORE INTO event_participants
+        (event_id, participant_id) VALUES (?, ?)
+        """,
         (event_id, participant_id)
     )
 
@@ -1491,7 +1230,10 @@ def enrollv2_participant(request: Request, event_id: int, participant_id: int):
     assert current_stage_order == 0
 
     first_stage = conn.execute(
-        "SELECT id, kind FROM event_stages WHERE event_id = ? AND stage_order = 1",
+        """
+        SELECT id, kind
+        FROM event_stages WHERE event_id = ? AND stage_order = 1
+        """,
         (event_id,)
     ).fetchone()
     if first_stage:
@@ -1631,16 +1373,16 @@ def get_edit_textbox_olympiads(request: Request, item_id: int, name: str = Query
     return _get_edit_textbox(request, "olympiads", item_id, name)
 
 @app.get("/api/players/{item_id}/edit")
-def get_edit_textbox_players(request: Request, item_id: int, version: int = Query(...), name: str = Query(...)):
-    return _get_edit_textbox(request, "players", item_id, version, name)
+def get_edit_textbox_players(request: Request, item_id: int, name: str = Query(...)):
+    return _get_edit_textbox(request, "players", item_id, name)
 
 @app.get("/api/teams/{item_id}/edit")
-def get_edit_textbox_teams(request: Request, item_id: int, version: int = Query(...), name: str = Query(...)):
-    return _get_edit_textbox(request, "teams", item_id, version, name)
+def get_edit_textbox_teams(request: Request, item_id: int, name: str = Query(...)):
+    return _get_edit_textbox(request, "teams", item_id, name)
 
 @app.get("/api/events/{item_id}/edit")
-def get_edit_textbox_events(request: Request, item_id: int, version: int = Query(...), name: str = Query(...)):
-    return _get_edit_textbox(request, "events", item_id, version, name)
+def get_edit_textbox_events(request: Request, item_id: int, name: str = Query(...)):
+    return _get_edit_textbox(request, "events", item_id, name)
 
 
 @app.get("/api/olympiads/{item_id}/cancel-edit")
@@ -1648,42 +1390,42 @@ def cancel_edit_olympiads(request: Request, item_id: int, name: str = Query(...)
     return _cancel_edit(request, "olympiads", item_id, name)
 
 @app.get("/api/players/{item_id}/cancel-edit")
-def cancel_edit_players(request: Request, item_id: int, version: int = Query(...), name: str = Query(...)):
-    return _cancel_edit(request, "players", item_id, version, name)
+def cancel_edit_players(request: Request, item_id: int, name: str = Query(...)):
+    return _cancel_edit(request, "players", item_id, name)
 
 @app.get("/api/teams/{item_id}/cancel-edit")
-def cancel_edit_teams(request: Request, item_id: int, version: int = Query(...), name: str = Query(...)):
-    return _cancel_edit(request, "teams", item_id, version, name)
+def cancel_edit_teams(request: Request, item_id: int, name: str = Query(...)):
+    return _cancel_edit(request, "teams", item_id, name)
 
 @app.get("/api/events/{item_id}/cancel-edit")
-def cancel_edit_events(request: Request, item_id: int, version: int = Query(...), name: str = Query(...)):
-    return _cancel_edit(request, "events", item_id, version, name)
+def cancel_edit_events(request: Request, item_id: int, name: str = Query(...)):
+    return _cancel_edit(request, "events", item_id, name)
 
 
 @app.put("/api/players/{entity_id}")
-def rename_players(request: Request, entity_id: int, name: str = Form(...), entity_version: int = Form(..., alias="version")):
-    return _rename_entity(request, "players", entity_id, name, entity_version)
+def rename_players(request: Request, entity_id: int, curr_name: str = Form(...), new_name: str = Form(...)):
+    return _rename_entity(request, "players", entity_id, curr_name, new_name)
 
 @app.put("/api/teams/{entity_id}")
-def rename_teams(request: Request, entity_id: int, name: str = Form(...), entity_version: int = Form(..., alias="version")):
-    return _rename_entity(request, "teams", entity_id, name, entity_version)
+def rename_teams(request: Request, entity_id: int, curr_name: str = Form(...), new_name: str = Form(...)):
+    return _rename_entity(request, "teams", entity_id, curr_name, new_name)
 
 @app.put("/api/events/{entity_id}")
-def rename_events(request: Request, entity_id: int, name: str = Form(...), entity_version: int = Form(..., alias="version")):
-    return _rename_entity(request, "events", entity_id, name, entity_version)
+def rename_events(request: Request, entity_id: int, curr_name: str = Form(...), new_name: str = Form(...)):
+    return _rename_entity(request, "events", entity_id, curr_name, new_name)
 
 
 @app.delete("/api/players/{entity_id}")
-def delete_players(request: Request, entity_id: int, entity_version: int = Query(..., alias="version")):
-    return _delete_entity(request, "players", entity_id, entity_version, request.state.conn)
+def delete_players(request: Request, entity_id: int, entity_name: str = Query(..., alias="name")):
+    return _delete_entity(request, "players", entity_id, entity_name)
 
 @app.delete("/api/teams/{entity_id}")
-def delete_teams(request: Request, entity_id: int, entity_version: int = Query(..., alias="version")):
-    return _delete_entity(request, "teams", entity_id, entity_version, request.state.conn)
+def delete_teams(request: Request, entity_id: int, entity_name: str = Query(..., alias="name")):
+    return _delete_entity(request, "teams", entity_id, entity_name)
 
 @app.delete("/api/events/{entity_id}")
-def delete_events(request: Request, entity_id: int, entity_version: int = Query(..., alias="version")):
-    return _delete_entity(request, "events", entity_id, entity_version, request.state.conn)
+def delete_events(request: Request, entity_id: int, entity_name: str = Query(..., alias="name")):
+    return _delete_entity(request, "events", entity_id, entity_name)
 
 
 # ---------------------------------------------------------------------------

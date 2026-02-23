@@ -2,7 +2,8 @@
     class="entity-element"
     hx-get="/api/{{ entities }}/{{ item.id }}?name={{ item.name }}"
     hx-target="{{ hx_target }}"
-    hx-trigger="click">
+    hx-trigger="click"
+    hx-swap="outerHTML">
     <div class="item">
         {{ item.name }}
     </div>

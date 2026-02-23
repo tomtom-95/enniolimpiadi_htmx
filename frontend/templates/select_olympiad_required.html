@@ -1,3 +1,13 @@
-<div class="message-box info">
-    <p>{{ message }}</p>
+<div id="modal" _="on closeModal from body remove me">
+    <div class="modal-underlay" _="on click trigger closeModal on body"></div>
+    <div class="modal-content" _="on click halt the event's bubbling">
+        <p>La mamma di Federico ...</p>
+        <div class="modal-actions">
+            <button hx-get="/api/olympiads"
+                hx-target="#main-content"
+                _="on click trigger closeModal on body">
+                Seleziona un'olimpiade
+            </button>
+        </div>
+    </div>
 </div>

@@ -1,9 +1,22 @@
 <div id="{{ entities }}-{{ id }}" class="entity-element editing"
-    hx-get="/api/{{ entities }}/{{ id }}/cancel-edit?name={{ curr_name }}&version={{ version }}" hx-target="#{{ entities }}-{{ id }}"
-    hx-swap="outerHTML" hx-trigger="closeEdit" _="on click elsewhere or keyup[key=='Escape'] from window trigger closeEdit">
-    <form class="edit-form" hx-put="/api/{{ entities }}/{{ id }}" hx-target="#{{ entities }}-{{ id }}" hx-swap="outerHTML">
-        <input type="hidden" name="curr_name" value="{{ curr_name }}">
-        <input type="text" name="new_name" value="{{ curr_name }}" class="edit-input" autofocus required
-            autocomplete="off" onfocus="this.setSelectionRange(this.value.length, this.value.length)">
+    hx-get="/api/{{ entities }}/{{ id }}/cancel-edit?name={{ curr_name }}&version={{ version }}"
+    hx-target="#{{ entities }}-{{ id }}"
+    hx-swap="outerHTML"
+    hx-trigger="closeEdit"
+    _="on click elsewhere or keyup[key=='Escape'] from window trigger closeEdit">
+    <form class="edit-form"
+        hx-put="/api/{{ entities }}/{{ id }}"
+        hx-target="#{{ entities }}-{{ id }}"
+        hx-swap="outerHTML">
+        <input type="hidden"
+            name="curr_name"
+            value="{{ curr_name }}">
+        <input type="text"
+            name="new_name"
+            value="{{ curr_name }}"
+            class="edit-input"
+            autofocus required
+            autocomplete="off"
+            onfocus="this.setSelectionRange(this.value.length, this.value.length)">
     </form>
 </div>

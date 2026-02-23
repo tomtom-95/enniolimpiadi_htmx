@@ -1,8 +1,10 @@
 <div class="event-stages-panel" id="stage-content">
     <div class="stage-nav">
         {% if stage_order > 1 %}
-            <button class="stage-arrow" hx-get="/api/events/{{ event_id }}/stage/{{ stage_order - 1 }}"
-                hx-target="#stage-content" hx-swap="outerHTML transition:true"
+            <button class="stage-arrow"
+                hx-get="/api/events/{{ event_id }}/stage/{{ stage_order - 1 }}"
+                hx-target="#stage-content"
+                hx-swap="outerHTML transition:true"
                 _="on click add .slide-back to <html/>">
                 &#8592;
             </button>
@@ -13,8 +15,10 @@
             {{ stage.name }} ({{ stage_order }}/{{ total_stages }})
         </span>
         {% if stage_order < total_stages %}
-            <button class="stage-arrow" hx-get="/api/events/{{ event_id }}/stage/{{ stage_order + 1 }}"
-                hx-target="#stage-content" hx-swap="outerHTML transition:true"
+            <button class="stage-arrow"
+                hx-get="/api/events/{{ event_id }}/stage/{{ stage_order + 1 }}"
+                hx-target="#stage-content"
+                hx-swap="outerHTML transition:true"
                 _="on click remove .slide-back from <html/>">
                 &#8594;
             </button>
