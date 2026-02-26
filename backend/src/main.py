@@ -89,28 +89,23 @@ def verify_olympiad_access(request, olympiad_id: int, olympiad_name: str):
     return row is not None
 
 
-def _modal_response(html_content):
-    response = HTMLResponse(html_content)
-    response.headers["HX-Retarget"] = "#modal-container"
-    response.headers["HX-Reswap"] = "innerHTML"
-    return response
-
-
-def _oob_badge_html(request, olympiad_badge_ctx: dict):
-    olympiad_data = get_olympiad_from_request(request)
-
-    if olympiad_badge_ctx["id"] == 0 or olympiad_badge_ctx["id"] == olympiad_data["id"]:
-        return templates.get_template("olympiad_badge.html").render(olympiad=olympiad_badge_ctx, oob=True)
-    else:
-        return templates.get_template("olympiad_badge.html").render(olympiad=olympiad_data, oob=True)
-
-
-def _access_denied_response(request, olympiad_id: int, olympiad_name: str):
+def _oob_badge_html(request):
     conn = request.state.conn
 
-    result = Status.SUCCESS
-    olympiad = conn.execute("SELECT * FROM olympiads WHERE id = ?", (olympiad_id,)).fetchone()
+    olympiad_data = get_olympiad_from_request(request)
+    olympiad = conn.execute("SELECT * FROM olympiads WHERE id = ?", (olympiad_data["id"],)).fetchone()
 
+    if not olympiad:
+        return templates.get_template("olympiad_badge.html").render(olympiad=sentinel_olympiad_badge, oob=True)
+    else:
+        olympiad_badge_ctx = {"id": olympiad["id"], "name": olympiad["name"], "version": olympiad["version"]}
+        return templates.get_template("olympiad_badge.html").render(olympiad=olympiad_badge_ctx, oob=True)
+
+
+def _render_access_denied(request, olympiad_id: int, olympiad_name: str):
+    conn = request.state.conn
+
+    olympiad = conn.execute("SELECT * FROM olympiads WHERE id = ?", (olympiad_id,)).fetchone()
     extra_headers = {}
     if not olympiad:
         html_content = templates.get_template("olympiad_not_found.html").render()
@@ -120,20 +115,21 @@ def _access_denied_response(request, olympiad_id: int, olympiad_name: str):
         result = Status.OLYMPIAD_RENAMED
     else:
         extra_headers["HX-Pin-Required"] = "true"
+        extra_headers["HX-Retarget"] = "#modal-container"
+        extra_headers["HX-Reswap"] = "innerHTML"
         html_content = templates.get_template("pin_modal.html").render(olympiad_id=olympiad_id)
         result = Status.NOT_AUTHORIZED
 
-    # return result, _modal_response(html_content, extra_headers)
-    return result, html_content
+    return result, html_content, extra_headers
 
 
 def check_olympiad_auth(request, olympiad_id: int, olympiad_name: str):
-    if verify_olympiad_access(request, olympiad_id, olympiad_name):
-        return Status.SUCCESS, None
+    result, response, extra_headers = Status.SUCCESS, None, None
 
-    result, response = _access_denied_response(request, olympiad_id, olympiad_name)
+    if not verify_olympiad_access(request, olympiad_id, olympiad_name):
+        result, response, extra_headers = _render_access_denied(request, olympiad_id, olympiad_name)
 
-    return result, response
+    return result, response, extra_headers
 
 
 def check_selected_olympiad(request):
@@ -440,9 +436,8 @@ def rename_olympiad(
     hx_target = f"#{request.headers.get('HX-Target')}"
 
     olympiad_badge_ctx = get_olympiad_from_request(request)
-    result, html_content = check_olympiad_auth(request, olympiad_id, olympiad_curr_name)
+    result, html_content, extra_headers = check_olympiad_auth(request, olympiad_id, olympiad_curr_name)
 
-    extra_headers = {}
     if result == Status.SUCCESS:
         duplicate = conn.execute(
             "SELECT 1 FROM olympiads WHERE name = ? AND id != ?",
@@ -461,27 +456,19 @@ def rename_olympiad(
             item = {"id": olympiad_id, "name": updated_row["name"]}
             html_content = templates.get_template("entity_element.html")
             html_content = html_content.render(item=item, entities="olympiads", hx_target=hx_target)
-            olympiad_badge_ctx = { "id": olympiad_id, "name": updated_row["name"], "version": updated_row["version"] }
     elif result == Status.OLYMPIAD_NOT_FOUND:
         html_content = templates.get_template("entity_deleted_oob.html").render()
-        if olympiad_id == olympiad_badge_ctx["id"]:
-            olympiad_badge_ctx = sentinel_olympiad_badge
     elif result == Status.OLYMPIAD_RENAMED:
         olympiad = conn.execute("SELECT * FROM olympiads WHERE id = ?", (olympiad_id,)).fetchone()
         olympiad_badge_ctx = { "id": olympiad_id, "name": olympiad["name"], "version": olympiad["version"] }
         html_content = templates.get_template("entity_renamed_oob.html")
         html_content = html_content.render(entities="olympiads", item=olympiad_badge_ctx, hx_target=hx_target)
 
-    html_content += _oob_badge_html(request, olympiad_badge_ctx)
+    html_content += _oob_badge_html(request)
+    response = HTMLResponse(html_content)
+    if extra_headers:
+        response.headers.update(extra_headers)
     
-    if result == Status.NOT_AUTHORIZED:
-        response = _modal_response(html_content)
-        response.headers["HX-Pin-Required"] = "true"
-    else:
-        response = HTMLResponse(html_content)
-        if extra_headers:
-            response.headers.update(extra_headers)
-
     if result:
         conn.commit()
     else:
@@ -493,12 +480,12 @@ def rename_olympiad(
 @app.delete("/api/olympiads/{olympiad_id}")
 def delete_olympiad(request: Request, olympiad_id: int, olympiad_name: str = Query(..., alias="name")):
     conn = request.state.conn
-
     conn.execute("BEGIN IMMEDIATE")
 
     hx_target = f"#{request.headers.get('HX-Target')}"
 
-    result, response = check_olympiad_auth(request, olympiad_id, olympiad_name)
+    olympiad_badge_ctx = get_olympiad_from_request(request)
+    result, html_content, extra_headers = check_olympiad_auth(request, olympiad_id, olympiad_name)
 
     if result == Status.SUCCESS:
         conn.execute(
@@ -506,15 +493,18 @@ def delete_olympiad(request: Request, olympiad_id: int, olympiad_name: str = Que
             (olympiad_id, olympiad_name)
         ).fetchone()
         html_content = templates.get_template("entity_delete.html").render()
-        html_content += _oob_badge_html(request, sentinel_olympiad_badge)
-        response = HTMLResponse(html_content)
     elif result == Status.OLYMPIAD_NOT_FOUND:
-        response = HTMLResponse(templates.get_template("entity_deleted_oob.html").render())
+        html_content = templates.get_template("entity_deleted_oob.html").render()
     elif result == Status.OLYMPIAD_RENAMED:
-        html_content = templates.get_template("entity_renamed_oob.html")
         olympiad = conn.execute("SELECT * FROM olympiads WHERE id = ?", (olympiad_id,)).fetchone()
         olympiad_badge_ctx = { "id": olympiad_id, "name": olympiad["name"], "version": olympiad["version"] }
-        response = HTMLResponse(html_content.render(entities="olympiads", item=olympiad_badge_ctx, hx_target=hx_target))
+        html_content = templates.get_template("entity_renamed_oob.html")
+        html_content = html_content.render(entities="olympiads", item=olympiad_badge_ctx, hx_target=hx_target)
+
+    html_content += _oob_badge_html(request)
+    response = HTMLResponse(html_content)
+    if extra_headers:
+        response.headers.update(extra_headers)
 
     if result:
         conn.commit()
