@@ -25,17 +25,18 @@
         <div class="content-area">
             <div class="side-menu is-collapsed">
                 <ul>
-                    <li hx-get="api/olympiads" hx-trigger="click, load" hx-target="#main-content">Olimpiadi</li>
+                    <li hx-get="api/olympiads" hx-trigger="click" hx-target="#main-content">Olimpiadi</li>
                     <li hx-get="api/events" hx-trigger="click" hx-target="#main-content">Eventi</li>
                     <li hx-get="api/players" hx-trigger="click" hx-target="#main-content">Giocatori</li>
                 </ul>
             </div>
-            <div id="main-content"></div>
+            <div id="main-content">
+                A presentation page
+            </div>
         </div>
         <div id="modal-container"></div>
     </body>
 <script>
-    // TODO: I thought this would happen on press but it seems to happen on release
     document.querySelector('.hamburger').addEventListener('mousedown', function() {
         this.classList.toggle('is-active');
         document.querySelector('.side-menu').classList.toggle('is-collapsed');
@@ -46,6 +47,31 @@
         evt.detail.headers['X-Olympiad-Id'] = badge.dataset.id;
         evt.detail.headers['X-Olympiad-Version'] = badge.dataset.version;
         evt.detail.headers['X-Olympiad-Name'] = badge.dataset.name;
+    });
+
+    // --- PIN auth: intercept and re-trigger after validation ---
+    var _pendingAuthElement = null;
+
+    // When a response signals PIN is required, store the element that made the
+    // request so we can re-trigger it after successful PIN validation.
+    document.body.addEventListener('htmx:afterRequest', function(evt) {
+        if (evt.detail.xhr.getResponseHeader('HX-Pin-Required')) {
+            _pendingAuthElement = evt.detail.elt;
+        }
+    });
+
+    // After successful PIN validation, re-trigger the original element
+    document.body.addEventListener('pinValidated', function() {
+        if (!_pendingAuthElement) return;
+        var elt = _pendingAuthElement;
+        _pendingAuthElement = null;
+
+        // TODO: would be cool to remove this if
+        if (elt.tagName === 'FORM') {
+            htmx.trigger(elt, 'submit');
+        } else {
+            htmx.trigger(elt, 'click');
+        }
     });
 </script>
 </html>

@@ -5,26 +5,35 @@
         {% if error %}
             <div class="error-banner">{{ error }}</div>
         {% endif %}
-        <form hx-post="{{ action }}" hx-target="#main-content" _="on htmx:afterRequest trigger closeModal on body">
-            {% for key, value in params.items() %}
-                <input type="hidden" name="{{ key }}" value="{{ value }}">
-            {% endfor %}
-            <input type="hidden" name="pin" id="pin-hidden" value="{{ pin | default('') }}">
-            <div class="pin-input-container">
-                <input type="text" inputmode="numeric" maxlength="1" class="pin-digit" autofocus>
-                <input type="text" inputmode="numeric" maxlength="1" class="pin-digit">
-                <input type="text" inputmode="numeric" maxlength="1" class="pin-digit">
-                <input type="text" inputmode="numeric" maxlength="1" class="pin-digit">
-            </div>
-            <div class="modal-actions">
-                <button type="button" class="btn-cancel" _="on click trigger closeModal on body">
-                    Annulla
-                </button>
-                <button type="submit" class="btn-submit">
-                    Conferma
-                </button>
-            </div>
-        </form>
+        {% if params %}
+            <form hx-post="/api/olympiads"
+                hx-target="#modal-container"
+                hx-swap="innerHTML">
+        {% else %}
+            <form hx-post="/api/validate_pin"
+                hx-target="#modal-container"
+                hx-swap="innerHTML">
+        {% endif %}
+                <input type="hidden" name="olympiad_id" value="{{ olympiad_id }}">
+                <input type="hidden" name="pin" id="pin-hidden" value="{{ pin | default('') }}">
+                {% if params %}
+                    <input type="hidden" name="name" id="name" value="{{ params.name }}">
+                {% endif %}
+                <div class="pin-input-container">
+                    <input type="text" inputmode="numeric" maxlength="1" class="pin-digit" autofocus>
+                    <input type="text" inputmode="numeric" maxlength="1" class="pin-digit">
+                    <input type="text" inputmode="numeric" maxlength="1" class="pin-digit">
+                    <input type="text" inputmode="numeric" maxlength="1" class="pin-digit">
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn-cancel" _="on click trigger closeModal on body">
+                        Annulla
+                    </button>
+                    <button type="submit" class="btn-submit">
+                        Conferma
+                    </button>
+                </div>
+            </form>
         <script>
             (function() {
                 const script = document.currentScript;
