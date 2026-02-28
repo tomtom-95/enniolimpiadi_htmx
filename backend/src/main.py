@@ -1091,7 +1091,7 @@ def _delete_entity(request: Request, entities: str, entity_id: int, entity_name:
         html_content = templates.get_template("entity_renamed_oob.html")
         html_content = html_content.render(entities=entities, item=entity_data, hx_target=hx_target)
     elif result == Status.SUCCESS:
-        conn.execute(f"DELETE FROM {entities} WHERE id = ? RETURNING id",(entity_id)).fetchone()
+        conn.execute(f"DELETE FROM {entities} WHERE id = ?", (entity_id,))
         html_content = templates.get_template("entity_delete.html").render()
 
 
