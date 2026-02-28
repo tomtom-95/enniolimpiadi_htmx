@@ -3,7 +3,7 @@
     hx-get="/api/{{ entities }}/{{ item.id }}?name={{ item.name }}"
     hx-target="{{ hx_target }}"
     hx-trigger="click"
-    hx-swap="outerHTML">
+    hx-swap="{% if entities == 'olympiads' %}outerHTML{% else %}innerHTML{% endif %}">
     <div class="item">
         {{ item.name }}
     </div>

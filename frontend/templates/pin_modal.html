@@ -7,8 +7,8 @@
         {% endif %}
         {% if params %}
             <form hx-post="/api/olympiads"
-                hx-target="#modal-container"
-                hx-swap="innerHTML">
+                hx-target="#entity-list"
+                hx-swap="afterbegin">
         {% else %}
             <form hx-post="/api/validate_pin"
                 hx-target="#modal-container"
