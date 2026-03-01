@@ -3,28 +3,25 @@
         {% set num_groups = stage.groups | length %}
         <div class="group-resize-bar">
             <span class="group-resize-label">Numero di gironi:</span>
-            <form class="group-resize-controls" hx-post="/api/events/{{ event_id }}/stages/{{ stage.id }}/resize"
-                hx-target="#stage-groups-content" hx-swap="outerHTML">
+            <div class="group-resize-controls">
                 {% if num_groups > 1 %}
-                    <button type="submit" name="num_groups" value="{{ num_groups - 1 }}" class="group-resize-btn">
-                        &minus;
-                    </button>
+                    <button hx-post="/api/events/{{ event_id }}/stages/{{ stage.id }}/resize"
+                        hx-vals='{"num_groups": {{ num_groups - 1 }}}'
+                        hx-target="#stage-groups-content" hx-swap="outerHTML"
+                        class="group-resize-btn">&minus;</button>
                 {% else %}
-                    <button type="submit" name="num_groups" value="{{ num_groups - 1 }}" class="group-resize-btn" disabled>
-                        &minus;
-                    </button>
+                    <button class="group-resize-btn" disabled>&minus;</button>
                 {% endif %}
                 <span class="group-resize-value">{{ num_groups }}</span>
                 {% if num_groups < stage.total_participants // 2 %}
-                    <button type="submit" name="num_groups" value="{{ num_groups + 1 }}" class="group-resize-btn">
-                        &plus;
-                    </button>
+                    <button hx-post="/api/events/{{ event_id }}/stages/{{ stage.id }}/resize"
+                        hx-vals='{"num_groups": {{ num_groups + 1 }}}'
+                        hx-target="#stage-groups-content" hx-swap="outerHTML"
+                        class="group-resize-btn">&plus;</button>
                 {% else %}
-                    <button type="submit" name="num_groups" value="{{ num_groups + 1 }}" class="group-resize-btn" disabled>
-                        &plus;
-                    </button>
+                    <button class="group-resize-btn" disabled>&plus;</button>
                 {% endif %}
-            </form>
+            </div>
         </div>
     {% endif %}
 

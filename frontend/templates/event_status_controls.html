@@ -1,0 +1,16 @@
+<div id="event-status-controls">
+    <div class="event-status-badge {{ event.status }}">{{ event.status }}</div>
+    {% if event.status == "registration" %}
+        <button hx-post="/api/events/{{ event.id }}/start"
+            hx-target="#event-page"
+            hx-swap="outerHTML">
+            Avvia evento
+        </button>
+    {% else %}
+        <button hx-post="/api/events/{{ event.id }}/back-to-registration"
+            hx-target="#event-page"
+            hx-swap="outerHTML">
+            Torna alla registrazione
+        </button>
+    {% endif %}
+</div>

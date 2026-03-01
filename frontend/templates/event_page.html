@@ -1,48 +1,38 @@
-<div class="event-page">
+<div id="event-page" class="event-page">
     <h2 class="event-title">{{ event.name }}</h2>
-    <div class="event-status-badge {{ event.status }}">{{ event.status }}</div>
-
+    {% include "event_status_controls.html" %}
     <div class="event-tabs">
-        {% if event.status == "registration" %}
-            <button id="tab-setup"
-                class="event-tab active"
+        <button id="tab-setup"
+            class="event-tab{{ ' active' if event.status == 'registration' }}"
+            {% if event.status == "registration" %}
                 hx-get="/api/events/{{ event.id }}/setup?version={{ event.version }}"
                 hx-trigger="load, click"
                 hx-target="#event-section-content"
                 hx-swap="innerHTML"
-                _="on click add .active to me then remove .active from #tab-players then remove .active from #tab-stages">
-                Setup
-            </button>
-            <button id="tab-players"
-                class="event-tab"
-                hx-get="/api/events/{{ event.id }}/players"
-                hx-target="#event-section-content"
-                hx-swap="innerHTML"
-                _="on click add .active to me then remove .active from #tab-setup then remove .active from #tab-stages">
-                Giocatori
-            </button>
-        {% else %}
-            <button id="tab-players"
-                class="event-tab active"
-                hx-get="/api/events/{{ event.id }}/players"
+                _="on click add .active to me then remove .active from #tab-players then remove .active from #tab-stages"
+            {% else %}
+                disabled
+            {% endif %}
+            >
+            Setup
+        </button>
+        <button id="tab-players"
+            class="event-tab{{ ' active' if event.status != 'registration' }}"
+            hx-get="/api/events/{{ event.id }}/players"
+            {% if event.status != "registration" %}
                 hx-trigger="load, click"
-                hx-target="#event-section-content"
-                hx-swap="innerHTML"
-                _="on click add .active to me then remove .active from #tab-stages">
-                Giocatori
-            </button>
-        {% endif %}
+            {% endif %}
+            hx-target="#event-section-content"
+            hx-swap="innerHTML"
+            _="on click add .active to me then remove .active from #tab-setup then remove .active from #tab-stages">
+            Giocatori
+        </button>
         <button id="tab-stages"
             class="event-tab"
             hx-get="/api/events/{{ event.id }}/stage/1"
             hx-target="#event-section-content"
             hx-swap="innerHTML"
-            {% if event.status == "registration" %}
-                _="on click add .active to me then remove .active from #tab-setup then remove .active from #tab-players"
-            {% else %}
-                _="on click add .active to me then remove .active from #tab-players"
-            {% endif %}
-            >
+            _="on click add .active to me then remove .active from #tab-setup then remove .active from #tab-players">
             Fasi
         </button>
     </div>
