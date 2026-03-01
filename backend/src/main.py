@@ -18,14 +18,15 @@ from . import events
 from enum import Enum
 
 class Status(Enum):
-    SUCCESS = "success"
-    OLYMPIAD_NOT_FOUND = "olympiad_not_found"
-    OLYMPIAD_RENAMED   = "olympiad_renamed"
-    NOT_AUTHORIZED     = "not_authorized"
-    NAME_DUPLICATION   = "name_duplication"
-    INVALID_PIN        = "invalid_pin"
-    ENTITY_NOT_FOUND   = "entity_not_found"
-    ENTITY_RENAMED     = "entity_renamed"
+    SUCCESS               = "success"
+    OLYMPIAD_NOT_FOUND    = "olympiad_not_found"
+    OLYMPIAD_RENAMED      = "olympiad_renamed"
+    OLYMPIAD_NOT_SELECTED = "olympiad_not_selectec"
+    NOT_AUTHORIZED        = "not_authorized"
+    NAME_DUPLICATION      = "name_duplication"
+    INVALID_PIN           = "invalid_pin"
+    ENTITY_NOT_FOUND      = "entity_not_found"
+    ENTITY_RENAMED        = "entity_renamed"
 
 db_path = Path(os.environ["DATABASE_PATH"])
 schema_path = Path(os.environ["SCHEMA_PATH"])
@@ -136,16 +137,19 @@ def _render_operation_denied(result, olympiad_id, entities):
     extra_headers = {}
 
     needs_modal = (
-        result == Status.OLYMPIAD_NOT_FOUND or
-        result == Status.OLYMPIAD_RENAMED   or
-        result == Status.NAME_DUPLICATION   or
-        result == Status.NOT_AUTHORIZED
+        result == Status.OLYMPIAD_NOT_FOUND     or
+        result == Status.OLYMPIAD_RENAMED       or
+        result == Status.NAME_DUPLICATION       or
+        result == Status.NOT_AUTHORIZED         or
+        result == Status.OLYMPIAD_NOT_SELECTED
     )
 
     if needs_modal:
         extra_headers["HX-Retarget"] = "#modal-container"
         extra_headers["HX-Reswap"] = "innerHTML"
 
+    if result == Status.OLYMPIAD_NOT_SELECTED:
+        html_content = templates.get_template("select_olympiad_required.html").render()
     if result == Status.OLYMPIAD_NOT_FOUND:
         html_content = templates.get_template("olympiad_not_found.html").render()
     elif result == Status.OLYMPIAD_RENAMED:
@@ -241,132 +245,32 @@ def check_olympiad_auth(request, olympiad_id: int, olympiad_name: str):
     return result, response, extra_headers
 
 
-def check_selected_olympiad(request):
-    conn = request.state.conn
-    selected_olympiad = get_olympiad_from_request(request)
-
-    if selected_olympiad["id"] == 0:
-        return True, None
-
-    selected = conn.execute(
-        "SELECT id, name, version FROM olympiads WHERE id = ?",
-        (selected_olympiad["id"],)
-    ).fetchone()
-
-    if not selected:
-        html = templates.get_template("olympiad_not_found.html").render()
-        html += _oob_badge_html(request, sentinel_olympiad_badge)
-        return False, _modal_response(html)
-    elif selected["name"] != selected_olympiad["name"]:
-        html = templates.get_template("olympiad_name_changed.html").render()
-        olympiad_badge = { "id": selected["id"], "name": selected["name"], "version": selected["version"] }
-        html += _oob_badge_html(request, olympiad_badge)
-        return False, _modal_response(html)
-    
-    return True, None
-
-
-def check_required_olympiad(request, entities):
-    olympiad_data = get_olympiad_from_request(request)
-    if olympiad_data["id"] == 0:
-        template_ctx = {"message": select_olympiad_message[entities]}
-        response = templates.TemplateResponse(request, "select_olympiad_required.html", template_ctx)
-        return False, response
-    else:
-        return check_selected_olympiad(request)
-
-
-# TODO: integrate event_version in verify_event_access
-def verify_event_access(conn, session_id, event_id):
-    """Check event exists and session is authorized. Returns olympiad_id or None."""
-    row = conn.execute(
-        """
-        SELECT e.olympiad_id
-        FROM events e
-        JOIN session_olympiad_auth soa
-          ON soa.olympiad_id = e.olympiad_id AND soa.session_id = ?
-        WHERE e.id = ?
-        """,
-        (session_id, event_id)
-    ).fetchone()
-    return row["olympiad_id"] if row else None
-
-
-def check_entity(request, entities, entity_id, entity_name):
-    conn = request.state.conn
-
-    item = conn.execute(
-        f"SELECT * FROM {entities} WHERE id = ?",
-        (entity_id,)
-    ).fetchone()
-
-    if not item:
-        html_content = templates.get_template("entity_deleted_oob.html").render()
-        response = HTMLResponse(html_content)
-        response.headers["HX-Retarget"] = f"#{entities}-{entity_id}"
-        response.headers["HX-Reswap"] = "outerHTML"
-        return False, response
-
-    if item["name"] != entity_name:
-        item_data = {"id": entity_id, "name": item["name"], "version": item["version"]}
-        html_content = templates.get_template("entity_renamed_oob.html").render(
-            item=item_data, entities=entities, hx_target="#main-content"
-        )
-        response = HTMLResponse(html_content)
-        response.headers["HX-Retarget"] = f"#{entities}-{entity_id}"
-        response.headers["HX-Reswap"] = "outerHTML"
-        return False, response
-
-    return True, None
-
-
-def diagnose_event_noop(
-    request: Request,
-    event_id: int,
-    session_id: str,
-) -> Response:
-    """
-    Diagnose why an event operation was a no-op and return appropriate response.
-
-    Called after verify_event_access returned None.
-    Checks: event deleted, olympiad deleted, or not authorized.
-    """
-    conn = request.state.conn
-
-    event = conn.execute(
-        "SELECT olympiad_id FROM events WHERE id = ?", (event_id,)
-    ).fetchone()
-
-    if not event:
-        # Event gone - check if the olympiad is gone too
-        olympiad_data = get_olympiad_from_request(request)
-        olympiad_id = olympiad_data["id"] if olympiad_data else None
-        olympiad_exists = conn.execute(
-            "SELECT id FROM olympiads WHERE id = ?", (olympiad_id,)
-        ).fetchone() if olympiad_id else None
-
-        if not olympiad_exists:
-            response = templates.TemplateResponse(request, "olympiad_not_found.html")
-            response.headers["HX-Retarget"] = "#main-content"
-            response.headers["HX-Reswap"] = "innerHTML"
-            trigger_badge_update(response)
-            return response
-
-        # Olympiad exists but event was deleted
-        response = templates.TemplateResponse(request, "event_not_found.html")
-        response.headers["HX-Retarget"] = "#modal-container"
-        response.headers["HX-Reswap"] = "innerHTML"
-        return response
-
-    # Event exists but not authorized - show PIN modal
-    response = templates.TemplateResponse(
-        request, "pin_modal.html", {"olympiad_id": event["olympiad_id"]}
-    )
-    response.headers["HX-Pin-Required"] = "true"
-    response.headers["HX-Retarget"] = "#modal-container"
-    response.headers["HX-Reswap"] = "innerHTML"
-    return response
-
+# def check_entity(request, entities, entity_id, entity_name):
+#     conn = request.state.conn
+# 
+#     item = conn.execute(
+#         f"SELECT * FROM {entities} WHERE id = ?",
+#         (entity_id,)
+#     ).fetchone()
+# 
+#     if not item:
+#         html_content = templates.get_template("entity_deleted_oob.html").render()
+#         response = HTMLResponse(html_content)
+#         response.headers["HX-Retarget"] = f"#{entities}-{entity_id}"
+#         response.headers["HX-Reswap"] = "outerHTML"
+#         return False, response
+# 
+#     if item["name"] != entity_name:
+#         item_data = {"id": entity_id, "name": item["name"], "version": item["version"]}
+#         html_content = templates.get_template("entity_renamed_oob.html").render(
+#             item=item_data, entities=entities, hx_target="#main-content"
+#         )
+#         response = HTMLResponse(html_content)
+#         response.headers["HX-Retarget"] = f"#{entities}-{entity_id}"
+#         response.headers["HX-Reswap"] = "outerHTML"
+#         return False, response
+# 
+#     return True, None
 
 
 @asynccontextmanager
@@ -609,16 +513,12 @@ def rename_olympiad(
     result = Status.SUCCESS
     if not check_olympiad_exist(request, olympiad_id):
         result = Status.OLYMPIAD_NOT_FOUND
-    
     if result == Status.SUCCESS and not check_olympiad_name(request, olympiad_id, olympiad_curr_name):
         result = Status.OLYMPIAD_RENAMED
-
     if result == Status.SUCCESS and check_olympiad_name_duplication(request, olympiad_id, olympiad_new_name):
         result = Status.NAME_DUPLICATION
-    
     if result == Status.SUCCESS and not check_user_authorized(request, olympiad_id):
         result = Status.NOT_AUTHORIZED
-    
 
     extra_headers = {}
     if result == Status.OLYMPIAD_NOT_FOUND:
@@ -670,10 +570,8 @@ def delete_olympiad(request: Request, olympiad_id: int, olympiad_name: str = Que
     result = Status.SUCCESS
     if not check_olympiad_exist(request, olympiad_id):
         result = Status.OLYMPIAD_NOT_FOUND
-    
     if result == Status.SUCCESS and not check_olympiad_name(request, olympiad_id, olympiad_name):
         result = Status.OLYMPIAD_RENAMED
-    
     if result == Status.SUCCESS and not check_user_authorized(request, olympiad_id):
         result = Status.NOT_AUTHORIZED
 
@@ -700,6 +598,155 @@ def delete_olympiad(request: Request, olympiad_id: int, olympiad_name: str = Que
     response = HTMLResponse(html_content)
     response.headers.update(extra_headers)
 
+    if result == Status.SUCCESS:
+        conn.commit()
+    else:
+        conn.rollback()
+    
+    return response
+
+
+# ---------------------------------------------------------------------------
+# Entity helpers - shared logic
+# ---------------------------------------------------------------------------
+
+def _list_entities(request: Request, entities: str):
+    conn = request.state.conn
+
+    olympiad_badge_ctx = get_olympiad_from_request(request)
+    olympiad_id = olympiad_badge_ctx["id"]
+    olympiad_name = olympiad_badge_ctx["name"]
+
+    result = Status.SUCCESS
+    if olympiad_id == 0:
+        result = Status.OLYMPIAD_NOT_SELECTED
+    if result == Status.SUCCESS and not check_olympiad_exist(request, olympiad_id):
+        result = Status.OLYMPIAD_NOT_FOUND
+    if result == Status.SUCCESS and not check_olympiad_name(request, olympiad_id, olympiad_name):
+        result = Status.OLYMPIAD_RENAMED
+
+    html_content, extra_headers = _render_operation_denied(result, olympiad_id, entities)
+
+    if result == Status.SUCCESS:
+        items = conn.execute(
+            f"SELECT e.id, e.name, e.version FROM {entities} e WHERE e.olympiad_id = ?",
+            (olympiad_id,)
+        ).fetchall()
+        placeholder = entity_list_form_placeholder[entities]
+        html_content = templates.get_template("entity_list.html")
+        html_content = html_content.render(entities=entities, placeholder=placeholder, items=items)
+
+    html_content += _oob_badge_html(request, olympiad_id)
+    response = HTMLResponse(html_content)
+    response.headers.update(extra_headers)
+
+    return response
+
+
+def _rename_entity(request: Request, entities: str, entity_id: int, entity_curr_name: str, entity_new_name: str):
+    conn = request.state.conn
+
+    olympiad_badge_ctx = get_olympiad_from_request(request)
+    olympiad_id = olympiad_badge_ctx["id"]
+    olympiad_name = olympiad_badge_ctx["name"]
+
+    hx_target = f"#{request.headers.get('HX-Target')}"
+
+    assert olympiad_id != 0
+
+    conn.execute("BEGIN IMMEDIATE")
+
+    result = Status.SUCCESS
+    if not check_olympiad_exist(request, olympiad_id):
+        result = Status.OLYMPIAD_NOT_FOUND
+    if result == Status.SUCCESS and not check_olympiad_name(request, olympiad_id, olympiad_name):
+        result = Status.OLYMPIAD_RENAMED
+    if result == Status.SUCCESS and not check_entity_exist(request, entities, entity_id):
+        result = Status.ENTITY_NOT_FOUND
+    if result == Status.SUCCESS and not check_entity_name(request, entities, entity_id, entity_curr_name):
+        result = Status.ENTITY_RENAMED
+    if result == Status.SUCCESS and check_entity_name_duplication(request, entities, 0, entity_new_name):
+        result = Status.NAME_DUPLICATION
+    if result == Status.SUCCESS and not check_user_authorized(request, olympiad_id):
+        result = Status.NOT_AUTHORIZED
+
+    html_content, extra_headers = _render_operation_denied(result, olympiad_id, entities)
+
+    if result == Status.ENTITY_NOT_FOUND:
+        html_content = templates.get_template("entity_deleted_oob.html").render()
+    elif result == Status.ENTITY_RENAMED:
+        entity = conn.execute(f"SELECT * FROM {entities} WHERE id = ?", (entity_id,)).fetchone()
+        entity_data = { "id": entity_id, "name": entity["name"], "version": entity["version"] }
+        html_content = templates.get_template("entity_renamed_oob.html")
+        html_content = html_content.render(entities=entities, item=entity_data, hx_target=hx_target)
+    elif result == Status.SUCCESS:
+        updated_row = conn.execute(
+            f"UPDATE {entities} SET name = ?, version = version + 1 WHERE id = ? RETURNING id, name, version",
+            (entity_new_name, entity_id)
+        ).fetchone()
+        item = {"id": entity_id, "name": updated_row["name"], "version": updated_row["version"]}
+        html_content = templates.get_template("entity_element.html")
+        html_content = html_content.render(item=item, entities=entities, hx_target=hx_target)
+
+    html_content += _oob_badge_html(request, olympiad_id)
+    response = HTMLResponse(html_content)
+    response.headers.update(extra_headers)
+    
+    if result == Status.SUCCESS:
+        conn.commit()
+    else:
+        conn.rollback()
+    
+    return response
+
+
+def _delete_entity(request: Request, entities: str, entity_id: int, entity_name: str):
+    conn = request.state.conn
+
+    olympiad_badge_ctx = get_olympiad_from_request(request)
+    olympiad_id = olympiad_badge_ctx["id"]
+    olympiad_name = olympiad_badge_ctx["name"]
+
+    hx_target = f"#{request.headers.get('HX-Target')}"
+
+    assert olympiad_id != 0
+
+    conn.execute("BEGIN IMMEDIATE")
+
+    result = Status.SUCCESS
+    if not check_olympiad_exist(request, olympiad_id):
+        result = Status.OLYMPIAD_NOT_FOUND
+    
+    if result == Status.SUCCESS and not check_olympiad_name(request, olympiad_id, olympiad_name):
+        result = Status.OLYMPIAD_RENAMED
+    
+    if result == Status.SUCCESS and not check_entity_exist(request, entities, entity_id):
+        result = Status.ENTITY_NOT_FOUND
+    
+    if result == Status.SUCCESS and not check_entity_name(request, entities, entity_id, entity_name):
+        result = Status.ENTITY_RENAMED
+
+    if result == Status.SUCCESS and not check_user_authorized(request, olympiad_id):
+        result = Status.NOT_AUTHORIZED
+
+    html_content, extra_headers = _render_operation_denied(result, olympiad_id, entities)
+
+    if result == Status.ENTITY_NOT_FOUND:
+        html_content = templates.get_template("entity_deleted_oob.html").render()
+    elif result == Status.ENTITY_RENAMED:
+        entity = conn.execute(f"SELECT * FROM {entities} WHERE id = ?", (entity_id,)).fetchone()
+        entity_data = { "id": entity_id, "name": entity["name"], "version": entity["version"] }
+        html_content = templates.get_template("entity_renamed_oob.html")
+        html_content = html_content.render(entities=entities, item=entity_data, hx_target=hx_target)
+    elif result == Status.SUCCESS:
+        conn.execute(f"DELETE FROM {entities} WHERE id = ?", (entity_id,))
+        html_content = templates.get_template("entity_delete.html").render()
+
+
+    html_content += _oob_badge_html(request, olympiad_id)
+    response = HTMLResponse(html_content)
+    response.headers.update(extra_headers)
+    
     if result == Status.SUCCESS:
         conn.commit()
     else:
@@ -905,209 +952,6 @@ def resize_stage_groups(
 
 
 # ---------------------------------------------------------------------------
-# Entity helpers - shared logic
-# ---------------------------------------------------------------------------
-
-def _list_entities(request: Request, entities: str):
-    res, response = check_required_olympiad(request, entities)
-    if not res:
-        return response
-
-    conn = request.state.conn
-    olympiad_id = get_olympiad_from_request(request)["id"]
-    items = conn.execute(
-        f"SELECT e.id, e.name, e.version FROM {entities} e WHERE e.olympiad_id = ?",
-        (olympiad_id,)
-    ).fetchall()
-    placeholder = entity_list_form_placeholder[entities]
-    return templates.TemplateResponse(
-        request,
-        "entity_list.html",
-        {
-            "entities": entities,
-            "placeholder": placeholder,
-            "items": items
-        }
-    )
-
-
-def _create_entity(request: Request, entities: str, name: str):
-    olympiad_data = get_olympiad_from_request(request)
-    olympiad_id   = olympiad_data["id"]
-
-    if olympiad_id == 0:
-        return templates.TemplateResponse(request, "select_olympiad_required.html")
-
-
-    res, response = check_olympiad_auth(request, olympiad_id, olympiad_data["name"])
-    if not res:
-        return response
-
-    conn = request.state.conn
-    if entities == "events":
-        insert_sql = f"""
-            INSERT INTO {entities} (name, olympiad_id, score_kind)
-            VALUES (?, ?, 'points')
-            RETURNING id, name, version
-            """
-    else:
-        insert_sql = f"""
-            INSERT INTO {entities} (name, olympiad_id)
-            VALUES (?, ?)
-            RETURNING id, name, version
-            """
-    try:
-        inserted_row = conn.execute(
-            insert_sql, (name, olympiad_id)
-        ).fetchone()
-
-        if entities == "players":
-            conn.execute(
-                "INSERT INTO participants (player_id, team_id) VALUES (?, ?)",
-                (inserted_row["id"], None)
-            )
-        else:
-            conn.execute(
-                "INSERT INTO participants (player_id, team_id) VALUES (?, ?)",
-                (None, inserted_row["id"])
-            )
-
-        item = {"id": inserted_row["id"], "name": inserted_row["name"], "version": inserted_row["version"]}
-        html_content = templates.get_template("entity_element.html").render(
-            item=item, entities=entities, hx_target="#main-content"
-        )
-        response = HTMLResponse(html_content)
-        response.headers["HX-Retarget"] = "#entity-list"
-        response.headers["HX-Reswap"] = "afterbegin"
-        conn.commit()
-        return response
-    except sqlite3.IntegrityError:
-        conn.rollback()
-        response = HTMLResponse(templates.get_template("entity_name_duplicate.html").render(entities=entities))
-        response.headers["HX-Retarget"] = "#modal-container"
-        response.headers["HX-Reswap"] = "innerHTML"
-        return response
-
-
-def _rename_entity(request: Request, entities: str, entity_id: int, entity_curr_name: str, entity_new_name: str):
-    conn = request.state.conn
-
-    olympiad_badge_ctx = get_olympiad_from_request(request)
-    olympiad_id = olympiad_badge_ctx["id"]
-    olympiad_name = olympiad_badge_ctx["name"]
-
-    hx_target = f"#{request.headers.get('HX-Target')}"
-
-    assert olympiad_id != 0
-
-    conn.execute("BEGIN IMMEDIATE")
-
-    result = Status.SUCCESS
-    if not check_olympiad_exist(request, olympiad_id):
-        result = Status.OLYMPIAD_NOT_FOUND
-    
-    if result == Status.SUCCESS and not check_olympiad_name(request, olympiad_id, olympiad_name):
-        result = Status.OLYMPIAD_RENAMED
-    
-    if result == Status.SUCCESS and not check_entity_exist(request, entities, entity_id):
-        result = Status.ENTITY_NOT_FOUND
-    
-    if result == Status.SUCCESS and not check_entity_name(request, entities, entity_id, entity_curr_name):
-        result = Status.ENTITY_RENAMED
-
-    if result == Status.SUCCESS and check_entity_name_duplication(request, entities, 0, entity_new_name):
-        result = Status.NAME_DUPLICATION
-    
-    if result == Status.SUCCESS and not check_user_authorized(request, olympiad_id):
-        result = Status.NOT_AUTHORIZED
-
-
-    html_content, extra_headers = _render_operation_denied(result, olympiad_id, entities)
-
-    if result == Status.ENTITY_NOT_FOUND:
-        html_content = templates.get_template("entity_deleted_oob.html").render()
-    elif result == Status.ENTITY_RENAMED:
-        entity = conn.execute(f"SELECT * FROM {entities} WHERE id = ?", (entity_id,)).fetchone()
-        entity_data = { "id": entity_id, "name": entity["name"], "version": entity["version"] }
-        html_content = templates.get_template("entity_renamed_oob.html")
-        html_content = html_content.render(entities=entities, item=entity_data, hx_target=hx_target)
-    elif result == Status.SUCCESS:
-        updated_row = conn.execute(
-            f"UPDATE {entities} SET name = ?, version = version + 1 WHERE id = ? RETURNING id, name, version",
-            (entity_new_name, entity_id)
-        ).fetchone()
-        item = {"id": entity_id, "name": updated_row["name"], "version": updated_row["version"]}
-        html_content = templates.get_template("entity_element.html")
-        html_content = html_content.render(item=item, entities=entities, hx_target=hx_target)
-
-    html_content += _oob_badge_html(request, olympiad_id)
-    response = HTMLResponse(html_content)
-    response.headers.update(extra_headers)
-    
-    if result == Status.SUCCESS:
-        conn.commit()
-    else:
-        conn.rollback()
-    
-    return response
-
-
-def _delete_entity(request: Request, entities: str, entity_id: int, entity_name: str):
-    conn = request.state.conn
-
-    olympiad_badge_ctx = get_olympiad_from_request(request)
-    olympiad_id = olympiad_badge_ctx["id"]
-    olympiad_name = olympiad_badge_ctx["name"]
-
-    hx_target = f"#{request.headers.get('HX-Target')}"
-
-    assert olympiad_id != 0
-
-    conn.execute("BEGIN IMMEDIATE")
-
-    result = Status.SUCCESS
-    if not check_olympiad_exist(request, olympiad_id):
-        result = Status.OLYMPIAD_NOT_FOUND
-    
-    if result == Status.SUCCESS and not check_olympiad_name(request, olympiad_id, olympiad_name):
-        result = Status.OLYMPIAD_RENAMED
-    
-    if result == Status.SUCCESS and not check_entity_exist(request, entities, entity_id):
-        result = Status.ENTITY_NOT_FOUND
-    
-    if result == Status.SUCCESS and not check_entity_name(request, entities, entity_id, entity_name):
-        result = Status.ENTITY_RENAMED
-
-    if result == Status.SUCCESS and not check_user_authorized(request, olympiad_id):
-        result = Status.NOT_AUTHORIZED
-
-    html_content, extra_headers = _render_operation_denied(result, olympiad_id, entities)
-
-    if result == Status.ENTITY_NOT_FOUND:
-        html_content = templates.get_template("entity_deleted_oob.html").render()
-    elif result == Status.ENTITY_RENAMED:
-        entity = conn.execute(f"SELECT * FROM {entities} WHERE id = ?", (entity_id,)).fetchone()
-        entity_data = { "id": entity_id, "name": entity["name"], "version": entity["version"] }
-        html_content = templates.get_template("entity_renamed_oob.html")
-        html_content = html_content.render(entities=entities, item=entity_data, hx_target=hx_target)
-    elif result == Status.SUCCESS:
-        conn.execute(f"DELETE FROM {entities} WHERE id = ?", (entity_id,))
-        html_content = templates.get_template("entity_delete.html").render()
-
-
-    html_content += _oob_badge_html(request, olympiad_id)
-    response = HTMLResponse(html_content)
-    response.headers.update(extra_headers)
-    
-    if result == Status.SUCCESS:
-        conn.commit()
-    else:
-        conn.rollback()
-    
-    return response
-
-
-# ---------------------------------------------------------------------------
 # Explicit entity routes - players, teams, events, edit/cancel-edit
 # ---------------------------------------------------------------------------
 
@@ -1125,11 +969,110 @@ def list_events(request: Request):
 
 @app.post("/api/players")
 def create_player(request: Request, name: str = Form(...)):
-    return _create_entity(request, "players", name)
+    conn = request.state.conn
+
+    olympiad_badge_ctx = get_olympiad_from_request(request)
+    olympiad_id = olympiad_badge_ctx["id"]
+    olympiad_name = olympiad_badge_ctx["name"]
+
+    conn.execute("BEGIN IMMEDIATE")
+
+    result = Status.SUCCESS
+    if olympiad_id == 0:
+        result = Status.OLYMPIAD_NOT_SELECTED
+    if result == Status.SUCCESS and not check_olympiad_exist(request, olympiad_id):
+        result = Status.OLYMPIAD_NOT_FOUND
+    if result == Status.SUCCESS and not check_olympiad_name(request, olympiad_id, olympiad_name):
+        result = Status.OLYMPIAD_RENAMED
+    if result == Status.SUCCESS and check_entity_name_duplication(request, "players", 0, name):
+        result = Status.NAME_DUPLICATION
+    if result == Status.SUCCESS and not check_user_authorized(request, olympiad_id):
+        result = Status.NOT_AUTHORIZED
+
+    html_content, extra_headers = _render_operation_denied(result, olympiad_id, "players")
+
+    if result == Status.SUCCESS:
+        inserted_row = conn.execute(
+            "INSERT INTO players (name, olympiad_id) VALUES (?, ?) RETURNING id, name, version",
+            (name, olympiad_id)
+        ).fetchone()
+
+        conn.execute(
+            "INSERT INTO participants (player_id, team_id) VALUES (?, ?)",
+            (inserted_row["id"], None)
+        )
+
+        item = {"id": inserted_row["id"], "name": inserted_row["name"], "version": inserted_row["version"]}
+        html_content = templates.get_template("entity_element.html").render(
+            item=item, entities="players", hx_target="#main-content"
+        )
+        extra_headers["HX-Retarget"] = "#entity-list"
+        extra_headers["HX-Reswap"] = "afterbegin"
+
+    html_content += _oob_badge_html(request, olympiad_id)
+    response = HTMLResponse(html_content)
+    response.headers.update(extra_headers)
+
+    if result == Status.SUCCESS:
+        conn.commit()
+    else:
+        conn.rollback()
+
+    return response
+
 
 @app.post("/api/teams")
 def create_team(request: Request, name: str = Form(...)):
-    return _create_entity(request, "teams", name)
+    conn = request.state.conn
+
+    olympiad_badge_ctx = get_olympiad_from_request(request)
+    olympiad_id = olympiad_badge_ctx["id"]
+    olympiad_name = olympiad_badge_ctx["name"]
+
+    conn.execute("BEGIN IMMEDIATE")
+
+    result = Status.SUCCESS
+    if olympiad_id == 0:
+        result = Status.OLYMPIAD_NOT_SELECTED
+    if result == Status.SUCCESS and not check_olympiad_exist(request, olympiad_id):
+        result = Status.OLYMPIAD_NOT_FOUND
+    if result == Status.SUCCESS and not check_olympiad_name(request, olympiad_id, olympiad_name):
+        result = Status.OLYMPIAD_RENAMED
+    if result == Status.SUCCESS and check_entity_name_duplication(request, "teams", 0, name):
+        result = Status.NAME_DUPLICATION
+    if result == Status.SUCCESS and not check_user_authorized(request, olympiad_id):
+        result = Status.NOT_AUTHORIZED
+
+    html_content, extra_headers = _render_operation_denied(result, olympiad_id, "teams")
+
+    if result == Status.SUCCESS:
+        inserted_row = conn.execute(
+            "INSERT INTO teams (name, olympiad_id) VALUES (?, ?) RETURNING id, name, version",
+            (name, olympiad_id)
+        ).fetchone()
+
+        conn.execute(
+            "INSERT INTO participants (player_id, team_id) VALUES (?, ?)",
+            (None, inserted_row["id"])
+        )
+
+        item = {"id": inserted_row["id"], "name": inserted_row["name"], "version": inserted_row["version"]}
+        html_content = templates.get_template("entity_element.html").render(
+            item=item, entities="teams", hx_target="#main-content"
+        )
+        extra_headers["HX-Retarget"] = "#entity-list"
+        extra_headers["HX-Reswap"] = "afterbegin"
+
+    html_content += _oob_badge_html(request, olympiad_id)
+    response = HTMLResponse(html_content)
+    response.headers.update(extra_headers)
+
+    if result == Status.SUCCESS:
+        conn.commit()
+    else:
+        conn.rollback()
+
+    return response
 
 @app.post("/api/events")
 def create_event(request: Request, name: str = Form(...)):
@@ -1146,13 +1089,10 @@ def create_event(request: Request, name: str = Form(...)):
     result = Status.SUCCESS
     if not check_olympiad_exist(request, olympiad_id):
         result = Status.OLYMPIAD_NOT_FOUND
-    
     if result == Status.SUCCESS and not check_olympiad_name(request, olympiad_id, olympiad_name):
         result = Status.OLYMPIAD_RENAMED
-
     if result == Status.SUCCESS and check_entity_name_duplication(request, "events", 0, name):
         result = Status.NAME_DUPLICATION
-    
     if result == Status.SUCCESS and not check_user_authorized(request, olympiad_id):
         result = Status.NOT_AUTHORIZED
 
