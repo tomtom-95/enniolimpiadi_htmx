@@ -1184,6 +1184,75 @@ html.slide-back::view-transition-new(stage-slide) {
     background: none;
 }
 
+.score-modal-inputs {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+}
+
+.score-modal-name {
+    font-weight: 600;
+    font-size: 1rem;
+    color: #2d2a4a;
+}
+
+.score-modal-sep {
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: #2d2a4a;
+}
+
+.modal-score-input {
+    width: 4rem;
+    padding: 0.4rem;
+    border: 2px solid #2d2a4a;
+    border-radius: 4px;
+    font-size: 1.2rem;
+    font-weight: 700;
+    text-align: center;
+    color: #2d2a4a;
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+
+.modal-score-input::-webkit-outer-spin-button,
+.modal-score-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.modal-score-input:focus {
+    outline: none;
+    border-color: #e85d4c;
+    box-shadow: 0 0 0 3px rgba(232, 93, 76, 0.2);
+}
+
+.outcome-modal-options {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+}
+
+.outcome-modal-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 1rem;
+    font-weight: 500;
+    color: #2d2a4a;
+    cursor: pointer;
+}
+
+.outcome-modal-label input[type="radio"] {
+    width: 1.1rem;
+    height: 1.1rem;
+    accent-color: #2d2a4a;
+    cursor: pointer;
+}
+
 /*
  * Single elimination bracket - Grid-based layout
  *

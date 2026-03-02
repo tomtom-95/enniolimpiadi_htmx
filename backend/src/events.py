@@ -167,6 +167,13 @@ def generate_single_elimination_stage(conn, stage_id: int):
 def present_groups_stage(conn, stage_id: int):
     """Build and render a groups stage for display."""
 
+    event_row = conn.execute(
+        "SELECT e.score_kind FROM event_stages es "
+        "JOIN events e ON e.id = es.event_id WHERE es.id = ?",
+        (stage_id,)
+    ).fetchone()
+    score_kind = event_row["score_kind"] if event_row else "points"
+
     # Build groups data
     group_rows = conn.execute(
         "SELECT id FROM groups WHERE event_stage_id = ? ORDER BY id",
@@ -217,7 +224,12 @@ def present_groups_stage(conn, stage_id: int):
                     if mr["p1_score"] is not None and mr["p2_score"] is not None
                     else None
                 )
-                scores.setdefault(p1_name, {})[p2_name] = score_str
+                scores.setdefault(p1_name, {})[p2_name] = {
+                    "match_id": mr["id"],
+                    "p1_id": mr["p1_id"],
+                    "p2_id": mr["p2_id"],
+                    "score": score_str,
+                }
 
         groups.append({
             "name": f"Girone {chr(65 + idx)}",
@@ -230,7 +242,8 @@ def present_groups_stage(conn, stage_id: int):
     stage = {
         "groups": groups,
         "id": stage_id,
-        "total_participants": total_participants
+        "total_participants": total_participants,
+        "score_kind": score_kind,
     }
 
     return stage

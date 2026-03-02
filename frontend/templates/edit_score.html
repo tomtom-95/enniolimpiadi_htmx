@@ -1,0 +1,52 @@
+<div id="modal" _="on closeModal from body remove me">
+    <div class="modal-underlay" _="on click trigger closeModal on body"></div>
+    <div class="modal-content" _="on click halt the event's bubbling">
+        <h3>{{ p1_name }} vs {{ p2_name }}</h3>
+        <form hx-put="/api/events/{{ event_id }}/matches/{{ match_id }}/score"
+              hx-target="#score-cell-{{ match_id }}"
+              hx-swap="outerHTML"
+              _="on htmx:afterOnLoad trigger closeModal on body">
+            <input type="hidden" name="p1_id" value="{{ p1_id }}">
+            <input type="hidden" name="p2_id" value="{{ p2_id }}">
+            <input type="hidden" name="score_kind" value="{{ score_kind }}">
+            {% if score_kind == "points" %}
+                <div class="score-modal-inputs">
+                    <span class="score-modal-name">{{ p1_name }}</span>
+                    <input type="number" name="p1_score"
+                        value="{{ p1_score if p1_score is not none else '' }}"
+                        min="0" autofocus class="modal-score-input">
+                    <span class="score-modal-sep">–</span>
+                    <input type="number" name="p2_score"
+                        value="{{ p2_score if p2_score is not none else '' }}"
+                        min="0" class="modal-score-input">
+                    <span class="score-modal-name">{{ p2_name }}</span>
+                </div>
+            {% elif score_kind == "outcome" %}
+                <div class="outcome-modal-options">
+                    <label class="outcome-modal-label">
+                        <input type="radio" name="outcome" value="p1"
+                            {% if p1_score == 1 and p2_score == 0 %}checked{% endif %}>
+                        {{ p1_name }}
+                    </label>
+                    <label class="outcome-modal-label">
+                        <input type="radio" name="outcome" value="draw"
+                            {% if p1_score is not none and p1_score == 0 and p2_score == 0 %}checked{% endif %}>
+                        Pareggio
+                    </label>
+                    <label class="outcome-modal-label">
+                        <input type="radio" name="outcome" value="p2"
+                            {% if p1_score == 0 and p2_score == 1 %}checked{% endif %}>
+                        {{ p2_name }}
+                    </label>
+                </div>
+            {% endif %}
+            <div class="modal-actions">
+                <button type="button" class="btn-cancel"
+                    _="on click trigger closeModal on body">
+                    Annulla
+                </button>
+                <button type="submit" class="btn-submit">Ok</button>
+            </div>
+        </form>
+    </div>
+</div>

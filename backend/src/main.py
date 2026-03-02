@@ -1,6 +1,8 @@
 import os
 import json
 import secrets
+import asyncio
+from collections import defaultdict
 
 from contextlib import asynccontextmanager
 
@@ -8,7 +10,7 @@ import sqlite3
 
 import uvicorn
 from fastapi import FastAPI, Request, Form, Query
-from fastapi.responses import JSONResponse, HTMLResponse, Response
+from fastapi.responses import JSONResponse, HTMLResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from pathlib import Path
 
@@ -244,32 +246,7 @@ def check_olympiad_auth(request, olympiad_id: int, olympiad_name: str):
     return result, response, extra_headers
 
 
-# def check_entity(request, entities, entity_id, entity_name):
-#     conn = request.state.conn
-# 
-#     item = conn.execute(
-#         f"SELECT * FROM {entities} WHERE id = ?",
-#         (entity_id,)
-#     ).fetchone()
-# 
-#     if not item:
-#         html_content = templates.get_template("entity_deleted_oob.html").render()
-#         response = HTMLResponse(html_content)
-#         response.headers["HX-Retarget"] = f"#{entities}-{entity_id}"
-#         response.headers["HX-Reswap"] = "outerHTML"
-#         return False, response
-# 
-#     if item["name"] != entity_name:
-#         item_data = {"id": entity_id, "name": item["name"], "version": item["version"]}
-#         html_content = templates.get_template("entity_renamed_oob.html").render(
-#             item=item_data, entities=entities, hx_target="#main-content"
-#         )
-#         response = HTMLResponse(html_content)
-#         response.headers["HX-Retarget"] = f"#{entities}-{entity_id}"
-#         response.headers["HX-Reswap"] = "outerHTML"
-#         return False, response
-# 
-#     return True, None
+_stage_subscribers: dict[int, set] = defaultdict(set)
 
 
 @asynccontextmanager
@@ -450,11 +427,8 @@ def select_olympiad(request: Request, olympiad_id: int, olympiad_name: str = Que
     result = Status.SUCCESS
     if not check_olympiad_exist(request, olympiad_id):
         result = Status.OLYMPIAD_NOT_FOUND
-    
     if result == Status.SUCCESS and not check_olympiad_name(request, olympiad_id, olympiad_name):
         result = Status.OLYMPIAD_RENAMED
-
-
     if result == Status.OLYMPIAD_NOT_FOUND:
         html_content = templates.get_template("entity_deleted_oob.html").render()
         html_content += _oob_badge_html(request, olympiad_badge_ctx["id"])
@@ -500,6 +474,131 @@ def get_edit_textbox_teams(request: Request, item_id: int, name: str = Query(...
 @app.get("/api/events/{item_id}/edit")
 def get_edit_textbox_events(request: Request, item_id: int, name: str = Query(...)):
     return _get_edit_textbox(request, "events", item_id, name)
+
+@app.get("/api/events/{event_id}/matches/{match_id}/score/edit")
+def get_edit_score(
+    request: Request,
+    event_id: int,
+    match_id: int,
+    p1_id: int = Query(...),
+    p2_id: int = Query(...),
+    score_kind: str = Query(...)
+):
+    conn = request.state.conn
+
+    score_rows = conn.execute(
+        "SELECT participant_id, score FROM match_participant_scores WHERE match_id = ?",
+        (match_id,)
+    ).fetchall()
+    score_map = {r["participant_id"]: r["score"] for r in score_rows}
+    p1_score = score_map.get(p1_id)
+    p2_score = score_map.get(p2_id)
+
+    def get_participant_name(pid):
+        row = conn.execute(
+            "SELECT COALESCE(pl.name, t.name) AS name FROM participants p "
+            "LEFT JOIN players pl ON pl.id = p.player_id "
+            "LEFT JOIN teams t ON t.id = p.team_id WHERE p.id = ?", (pid,)
+        ).fetchone()
+        return row["name"] if row else str(pid)
+
+    template_ctx = {
+        "event_id": event_id,
+        "match_id": match_id,
+        "p1_id": p1_id,
+        "p2_id": p2_id,
+        "p1_name": get_participant_name(p1_id),
+        "p2_name": get_participant_name(p2_id),
+        "score_kind": score_kind,
+        "p1_score": p1_score,
+        "p2_score": p2_score,
+    }
+    return templates.TemplateResponse(request, "edit_score.html", template_ctx)
+
+
+@app.get("/api/events/{event_id}/matches/{match_id}/score/cancel-edit")
+def cancel_edit_score(
+    request: Request, event_id: int, match_id: int,
+    p1_id: int = Query(...), p2_id: int = Query(...), score_kind: str = Query(...)
+):
+    conn = request.state.conn
+
+    score_rows = conn.execute(
+        "SELECT participant_id, score FROM match_participant_scores WHERE match_id = ?",
+        (match_id,)
+    ).fetchall()
+    score_map = {r["participant_id"]: r["score"] for r in score_rows}
+    p1_score = score_map.get(p1_id)
+    p2_score = score_map.get(p2_id)
+    score_str = (
+        f"{p1_score} - {p2_score}"
+        if p1_score is not None and p2_score is not None else None
+    )
+
+    ctx = {
+        "event_id": event_id,
+        "match_id": match_id,
+        "p1_id": p1_id,
+        "p2_id": p2_id,
+        "score_kind": score_kind,
+        "score": score_str,
+    }
+    return templates.TemplateResponse(request, "score_cell.html", ctx)
+
+
+@app.put("/api/events/{event_id}/matches/{match_id}/score")
+async def update_match_score(
+    request: Request,
+    event_id: int,
+    match_id: int,
+    p1_id: int = Form(...),
+    p2_id: int = Form(...),
+    score_kind: str = Form(...),
+    p1_score: int = Form(None),
+    p2_score: int = Form(None),
+    outcome: str = Form(None)
+):
+    conn = request.state.conn
+    conn.execute("BEGIN IMMEDIATE")
+
+    if score_kind == "outcome":
+        if outcome == "p1":
+            p1_score, p2_score = 1, 0
+        elif outcome == "p2":
+            p1_score, p2_score = 0, 1
+        else:
+            p1_score, p2_score = 0, 0
+
+    for pid, score in [(p1_id, p1_score), (p2_id, p2_score)]:
+        conn.execute(
+            "INSERT INTO match_participant_scores (match_id, participant_id, score) VALUES (?, ?, ?) "
+            "ON CONFLICT (match_id, participant_id) DO UPDATE SET score = excluded.score",
+            (match_id, pid, score)
+        )
+
+    conn.commit()
+
+    score_str = f"{p1_score} - {p2_score}"
+
+    stage_row = conn.execute(
+        "SELECT g.event_stage_id FROM matches m JOIN groups g ON g.id = m.group_id WHERE m.id = ?",
+        (match_id,)
+    ).fetchone()
+    if stage_row:
+        msg = "event: score-update\ndata: \n\n"
+        for queue in list(_stage_subscribers.get(stage_row["event_stage_id"], [])):
+            queue.put_nowait(msg)
+
+    ctx = {
+        "event_id": event_id,
+        "match_id": match_id,
+        "p1_id": p1_id,
+        "p2_id": p2_id,
+        "score_kind": score_kind,
+        "score": score_str,
+    }
+    return templates.TemplateResponse(request, "score_cell.html", ctx)
+
 
 
 def _cancel_edit(request: Request, entities: str, item_id: int, name: str):
@@ -1231,6 +1330,42 @@ def get_event_stage(request: Request, event_id: int, stage_order: int):
 
 @app.post("/api/events/{event_id}/stages/{stage_id}/resize")
 def resize_stage_groups(request: Request, event_id: int, stage_id: int, num_groups: int = Form(...)):
+    # when I am resizing the stage group it might be that some other admin meanwhile has changed the name
+    # of the event or might have deleted this stage or already changed the stage order
+    # In all these cases what the user is seeing is stale data that with the current strategy should be checked in
+    # the check phase. I am starting to wonder if this is the correct approach
+    # With the data I currently pass to the function I cannot even do all these checks
+    # I should pass to this endpoint the name of the event currently displayed to the frontend
+    # I should pass to this endpoint the num_groups size the user is currently seeing on the frontend
+    # Using the version field of the event row I do not think is a good solution because the version
+    # field might change for multiple reasons unrelated to the number of groups
+
+    # Would a realtime update solve this? In a real time updated I want a way to register the fact that the user
+    # is visualizing an event stage page for a group stage
+    # What I want is an update of the page in multiple places
+    #   - I want an "hook" that updates the Event name every time someone change it
+    #   - I want an "hook" that updates the event-status-control in case someone change the status of the event
+    #   - I want a way to update the event-stage panel is someone else deleted the stage I am working on or changes it
+    #   and so on ...
+    #   there is a ton of checks that must be done before doing anything but I am not even sure the update real time is the
+    #   way to go
+    # The htmx way would be to establish an sse connection and every element that could be modified by someone will listen
+    # to a specific event. This means, for example, that when an admin successfully resize the stage groups, the stage-groups-content
+    # template must be updated for all the user that are currently visualizing that particular stage of the event
+    # This works but assume that no-one will ever delete this stage. How do I handle the case in which a user delete the stage?
+    # In this case what should happen exactly? Let's start by the user experience: what I want to see as an user that is looking
+    # at this event stage?
+
+    #   Option1: SSE is setup so that as soon as someone delete the stage I am looking at a modal appears that informs me that
+    #            the stage has been eliminated. The modal has a reload button to reload the event. When pressed a request is made
+    #            to rerender the event_page.html for the event with the given event_id
+    #            In practice this means that the event_stage.html is listening to an event from the backend
+    #            (e.g. eventStageDeleted<stage_id>) and react as soon as this event is sent
+    #   Option2: keep all as it is and make the SSE only for the score update stuff
+
+    # Another event should be the creation of a new stage, this would require the update of the stage-nav, but I do not know man
+
+
     conn = request.state.conn
 
     olympiad_badge_ctx = get_olympiad_from_request(request)
@@ -1279,9 +1414,8 @@ def resize_stage_groups(request: Request, event_id: int, stage_id: int, num_grou
                 else:
                     events.generate_groups_stage(conn, stage_id, num_groups)
                     stage = events.present_groups_stage(conn, stage_id)
-                    html_content = templates.get_template("stage_groups.html").render(
-                        stage=stage, event_id=event_id,
-                    )
+                    html_content = templates.get_template("stage_groups.html")
+                    html_content = html_content.render(stage=stage, event_id=event_id)
 
     html_content += _oob_badge_html(request, olympiad_id)
     response = HTMLResponse(html_content)
@@ -1293,6 +1427,51 @@ def resize_stage_groups(request: Request, event_id: int, stage_id: int, num_grou
         conn.rollback()
 
     return response
+
+
+# ---------------------------------------------------------------------------
+# Stage groups content (used by SSE-triggered refresh)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/events/{event_id}/stages/{stage_id}/groups-content")
+def get_stage_groups_content(request: Request, event_id: int, stage_id: int):
+    conn = request.state.conn
+    stage = events.present_groups_stage(conn, stage_id)
+    return templates.TemplateResponse(
+        request,
+        "stage_groups_inner.html",
+        {
+            "stage": stage,
+            "event_id": event_id,
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
+# Stage SSE stream
+# ---------------------------------------------------------------------------
+
+@app.get("/api/events/{event_id}/stages/{stage_id}/sse")
+async def stage_sse(request: Request, event_id: int, stage_id: int):
+    queue: asyncio.Queue = asyncio.Queue()
+    _stage_subscribers[stage_id].add(queue)
+
+    async def generate():
+        try:
+            while True:
+                try:
+                    data = await asyncio.wait_for(queue.get(), timeout=25.0)
+                    if data is None:  # shutdown sentinel
+                        break
+                    yield data
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+        finally:
+            _stage_subscribers[stage_id].discard(queue)
+
+    media_type = "text/event-stream"
+    headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    return StreamingResponse(generate(), media_type=media_type, headers=headers)
 
 
 # ---------------------------------------------------------------------------
@@ -1700,6 +1879,7 @@ def unenroll_participant(request: Request, event_id: int, participant_id: int):
 
     return response
 
+@app.post("/api/events/{event_id}/stage/{}")
 
 # ---------------------------------------------------------------------------
 # Auth
