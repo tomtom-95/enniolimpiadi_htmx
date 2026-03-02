@@ -475,6 +475,7 @@ def get_edit_textbox_teams(request: Request, item_id: int, name: str = Query(...
 def get_edit_textbox_events(request: Request, item_id: int, name: str = Query(...)):
     return _get_edit_textbox(request, "events", item_id, name)
 
+
 @app.get("/api/events/{event_id}/matches/{match_id}/score/edit")
 def get_edit_score(
     request: Request,
@@ -512,14 +513,63 @@ def get_edit_score(
         "score_kind": score_kind,
         "p1_score": p1_score,
         "p2_score": p2_score,
+        "hx_action": f"/api/events/{event_id}/matches/{match_id}/score",
+        "hx_target": f"#score-cell-{match_id}",
+        "hx_swap": "outerHTML",
+    }
+    return templates.TemplateResponse(request, "edit_score.html", template_ctx)
+
+
+@app.get("/api/events/{event_id}/matches/{match_id}/bracket-score/edit")
+def get_edit_bracket_score(
+    request: Request,
+    event_id: int,
+    match_id: int,
+    p1_id: int = Query(...),
+    p2_id: int = Query(...),
+    score_kind: str = Query(...)
+):
+    conn = request.state.conn
+
+    score_rows = conn.execute(
+        "SELECT participant_id, score FROM match_participant_scores WHERE match_id = ?",
+        (match_id,)
+    ).fetchall()
+    score_map = {r["participant_id"]: r["score"] for r in score_rows}
+
+    def get_participant_name(pid):
+        row = conn.execute(
+            "SELECT COALESCE(pl.name, t.name) AS name FROM participants p "
+            "LEFT JOIN players pl ON pl.id = p.player_id "
+            "LEFT JOIN teams t ON t.id = p.team_id WHERE p.id = ?", (pid,)
+        ).fetchone()
+        return row["name"] if row else str(pid)
+
+    template_ctx = {
+        "event_id": event_id,
+        "match_id": match_id,
+        "p1_id": p1_id,
+        "p2_id": p2_id,
+        "p1_name": get_participant_name(p1_id),
+        "p2_name": get_participant_name(p2_id),
+        "score_kind": score_kind,
+        "p1_score": score_map.get(p1_id),
+        "p2_score": score_map.get(p2_id),
+        "hx_action": f"/api/events/{event_id}/matches/{match_id}/bracket-score",
+        "hx_target": "#stage-bracket-inner",
+        "hx_swap": "outerHTML",
     }
     return templates.TemplateResponse(request, "edit_score.html", template_ctx)
 
 
 @app.get("/api/events/{event_id}/matches/{match_id}/score/cancel-edit")
 def cancel_edit_score(
-    request: Request, event_id: int, match_id: int,
-    p1_id: int = Query(...), p2_id: int = Query(...), score_kind: str = Query(...)
+    request: Request,
+    event_id: int,
+    match_id: int,
+    p1_id: int = Query(...),
+    p2_id: int = Query(...),
+    score_kind: str = Query(...)
 ):
     conn = request.state.conn
 
@@ -599,6 +649,62 @@ async def update_match_score(
     }
     return templates.TemplateResponse(request, "score_cell.html", ctx)
 
+
+@app.put("/api/events/{event_id}/matches/{match_id}/bracket-score")
+async def update_bracket_score(
+    request: Request, event_id: int, match_id: int,
+    p1_id: int = Form(...), p2_id: int = Form(...), score_kind: str = Form(...),
+    p1_score: int = Form(None), p2_score: int = Form(None),
+    outcome: str = Form(None)
+):
+    conn = request.state.conn
+    conn.execute("BEGIN IMMEDIATE")
+
+    if score_kind == "outcome":
+        if outcome == "p1":
+            p1_score, p2_score = 1, 0
+        elif outcome == "p2":
+            p1_score, p2_score = 0, 1
+        else:
+            p1_score, p2_score = 0, 0
+
+    for pid, score in [(p1_id, p1_score), (p2_id, p2_score)]:
+        conn.execute(
+            "INSERT INTO match_participant_scores (match_id, participant_id, score) VALUES (?, ?, ?) "
+            "ON CONFLICT (match_id, participant_id) DO UPDATE SET score = excluded.score",
+            (match_id, pid, score)
+        )
+
+    winner_id = events.determine_bracket_winner(p1_id, p1_score, p2_id, p2_score, score_kind)
+    events.advance_bracket_winner(conn, match_id, winner_id)
+
+    conn.commit()
+
+    stage_row = conn.execute(
+        "SELECT g.event_stage_id FROM matches m JOIN groups g ON g.id = m.group_id WHERE m.id = ?",
+        (match_id,)
+    ).fetchone()
+    stage_id = stage_row["event_stage_id"]
+
+    msg = "event: score-update\ndata: \n\n"
+    for queue in list(_stage_subscribers.get(stage_id, [])):
+        queue.put_nowait(msg)
+
+    stage = events.present_single_elimination_stage(conn, stage_id)
+    return templates.TemplateResponse(request, "stage_single_elimination_inner.html", {
+        "stage": stage,
+        "event_id": event_id,
+    })
+
+
+@app.get("/api/events/{event_id}/stages/{stage_id}/bracket-content")
+def get_bracket_content(request: Request, event_id: int, stage_id: int):
+    conn = request.state.conn
+    stage = events.present_single_elimination_stage(conn, stage_id)
+    return templates.TemplateResponse(request, "stage_single_elimination_inner.html", {
+        "stage": stage,
+        "event_id": event_id,
+    })
 
 
 def _cancel_edit(request: Request, entities: str, item_id: int, name: str):
@@ -1933,4 +2039,4 @@ def validate_pin(request: Request, pin: str = Form(...), olympiad_id: int = Form
 
 
 if __name__ == "__main__":
-    uvicorn.run("src.main:app", reload=True, host="0.0.0.0", port=8080)
+    uvicorn.run("src.main:app", reload=True, host="0.0.0.0", port=8000, timeout_graceful_shutdown=1)

@@ -1295,6 +1295,20 @@ html.slide-back::view-transition-new(stage-slide) {
     color: #9995a8;
 }
 
+.bracket-match.clickable {
+    cursor: pointer;
+}
+
+.bracket-match.clickable:hover {
+    border-left-color: #e85d4c;
+    background-color: #fdf6f5;
+}
+
+.bracket-participant.bracket-winner {
+    font-weight: 700;
+    color: #2d2a4a;
+}
+
 /*
  * Event modal
  */

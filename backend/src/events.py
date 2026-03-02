@@ -163,6 +163,21 @@ def generate_single_elimination_stage(conn, stage_id: int):
                 (match_id, participant_ids[seed_b - 1])
             )
 
+    # Auto-advance bye participants (matches with only one player) to the next round.
+    for match_id in first_round:
+        pids = conn.execute(
+            "SELECT participant_id FROM match_participants WHERE match_id = ?", (match_id,)
+        ).fetchall()
+        if len(pids) == 1:
+            bm = conn.execute(
+                "SELECT next_match_id FROM bracket_matches WHERE match_id = ?", (match_id,)
+            ).fetchone()
+            if bm and bm["next_match_id"]:
+                conn.execute(
+                    "INSERT OR IGNORE INTO match_participants (match_id, participant_id) VALUES (?, ?)",
+                    (bm["next_match_id"], pids[0]["participant_id"])
+                )
+
 
 def present_groups_stage(conn, stage_id: int):
     """Build and render a groups stage for display."""
@@ -249,10 +264,83 @@ def present_groups_stage(conn, stage_id: int):
     return stage
 
 
+def determine_bracket_winner(p1_id, p1_score, p2_id, p2_score, score_kind):
+    """Return the winner's participant_id, or None if there is no clear winner."""
+    if p1_score is None or p2_score is None:
+        return None
+    if score_kind == "outcome":
+        if p1_score == 1 and p2_score == 0:
+            return p1_id
+        elif p2_score == 1 and p1_score == 0:
+            return p2_id
+        return None
+    else:  # points
+        if p1_score > p2_score:
+            return p1_id
+        elif p2_score > p1_score:
+            return p2_id
+        return None
+
+
+def _cascade_clear_bracket(conn, match_id, pids):
+    """Remove pids from match_id's next match and recurse through the bracket."""
+    if not pids:
+        return
+    bm = conn.execute(
+        "SELECT next_match_id FROM bracket_matches WHERE match_id = ?", (match_id,)
+    ).fetchone()
+    if not bm or bm["next_match_id"] is None:
+        return
+    next_mid = bm["next_match_id"]
+    ph = ",".join("?" * len(pids))
+    found = {r["participant_id"] for r in conn.execute(
+        f"SELECT participant_id FROM match_participants "
+        f"WHERE match_id = ? AND participant_id IN ({ph})",
+        [next_mid] + list(pids)
+    ).fetchall()}
+    if not found:
+        return
+    for pid in found:
+        conn.execute(
+            "DELETE FROM match_participants WHERE match_id = ? AND participant_id = ?",
+            (next_mid, pid)
+        )
+    conn.execute("DELETE FROM match_participant_scores WHERE match_id = ?", (next_mid,))
+    _cascade_clear_bracket(conn, next_mid, found)
+
+
+def advance_bracket_winner(conn, match_id, winner_id):
+    """Advance winner_id to the next bracket match, cascading removal of old winner.
+
+    If winner_id is None (draw/tie), clears old advancement without inserting anyone.
+    """
+    bm = conn.execute(
+        "SELECT next_match_id FROM bracket_matches WHERE match_id = ?", (match_id,)
+    ).fetchone()
+    if not bm or bm["next_match_id"] is None:
+        return
+    next_mid = bm["next_match_id"]
+    pids = {r["participant_id"] for r in conn.execute(
+        "SELECT participant_id FROM match_participants WHERE match_id = ?", (match_id,)
+    ).fetchall()}
+    _cascade_clear_bracket(conn, match_id, pids)
+    if winner_id is not None:
+        conn.execute(
+            "INSERT OR IGNORE INTO match_participants (match_id, participant_id) VALUES (?, ?)",
+            (next_mid, winner_id)
+        )
+
+
 def present_single_elimination_stage(conn, stage_id):
     """Build a single-elimination stage dict from DB data."""
 
-    # Load all bracket matches for this stage
+    event_row = conn.execute(
+        "SELECT e.score_kind FROM event_stages es "
+        "JOIN events e ON e.id = es.event_id WHERE es.id = ?",
+        (stage_id,)
+    ).fetchone()
+    score_kind = event_row["score_kind"] if event_row else "points"
+
     rows = conn.execute(
         "SELECT m.id AS match_id, bm.next_match_id "
         "FROM groups g "
@@ -263,11 +351,11 @@ def present_single_elimination_stage(conn, stage_id):
     ).fetchall()
 
     if not rows:
-        return { "rounds": [], "id": stage_id }
+        return {"rounds": [], "id": stage_id, "score_kind": score_kind}
 
-    # Load participants for all these matches
     match_ids = [r["match_id"] for r in rows]
     placeholders = ",".join("?" * len(match_ids))
+
     mp_rows = conn.execute(
         f"SELECT mp.match_id, mp.participant_id, "
         f"  COALESCE(pl.name, t.name) AS display_name "
@@ -275,16 +363,15 @@ def present_single_elimination_stage(conn, stage_id):
         f"JOIN participants p ON p.id = mp.participant_id "
         f"LEFT JOIN players pl ON pl.id = p.player_id "
         f"LEFT JOIN teams t ON t.id = p.team_id "
-        f"WHERE mp.match_id IN ({placeholders})",
+        f"WHERE mp.match_id IN ({placeholders}) "
+        f"ORDER BY mp.participant_id",
         match_ids
     ).fetchall()
 
-    # match_id -> list of (participant_id, name)
     match_parts = defaultdict(list)
     for r in mp_rows:
         match_parts[r["match_id"]].append((r["participant_id"], r["display_name"]))
 
-    # Load scores
     score_rows = conn.execute(
         f"SELECT match_id, participant_id, score "
         f"FROM match_participant_scores "
@@ -295,7 +382,6 @@ def present_single_elimination_stage(conn, stage_id):
     for r in score_rows:
         score_map[(r["match_id"], r["participant_id"])] = r["score"]
 
-    # Build bracket tree
     feeders = defaultdict(list)
     matches_by_id = {}
     for r in rows:
@@ -303,23 +389,20 @@ def present_single_elimination_stage(conn, stage_id):
         if r["next_match_id"] is not None:
             feeders[r["next_match_id"]].append(r["match_id"])
 
-    # Find the final (next_match_id IS NULL)
     final_id = None
     for mid, r in matches_by_id.items():
         if r["next_match_id"] is None:
             final_id = mid
             break
 
-    # BFS to assign round depths (0 = final)
     round_assignment = {}
-    queue = deque([(final_id, 0)])
-    while queue:
-        mid, depth = queue.popleft()
+    bfs_queue = deque([(final_id, 0)])
+    while bfs_queue:
+        mid, depth = bfs_queue.popleft()
         round_assignment[mid] = depth
         for feeder_id in feeders.get(mid, []):
-            queue.append((feeder_id, depth + 1))
+            bfs_queue.append((feeder_id, depth + 1))
 
-    # Group by round, earliest rounds first
     max_round = max(round_assignment.values()) if round_assignment else 0
     rounds_list = []
     for r in range(max_round, -1, -1):
@@ -328,18 +411,33 @@ def present_single_elimination_stage(conn, stage_id):
         match_dicts = []
         for mid in mids_in_round:
             parts = match_parts.get(mid, [])
-            p1 = parts[0][1] if len(parts) > 0 else "?"
-            p2 = parts[1][1] if len(parts) > 1 else "?"
-            s1 = score_map.get((mid, parts[0][0])) if len(parts) > 0 else None
-            s2 = score_map.get((mid, parts[1][0])) if len(parts) > 1 else None
-            if s1 is not None and s2 is not None:
-                score = f"{s1} - {s2}"
-            else:
-                score = "- vs -"
-            match_dicts.append({"p1": p1, "p2": p2, "score": score})
+            p1_id   = parts[0][0] if len(parts) > 0 else None
+            p2_id   = parts[1][0] if len(parts) > 1 else None
+            p1_name = parts[0][1] if len(parts) > 0 else "?"
+            p2_name = parts[1][1] if len(parts) > 1 else "?"
+            s1 = score_map.get((mid, p1_id)) if p1_id else None
+            s2 = score_map.get((mid, p2_id)) if p2_id else None
+            has_score = s1 is not None and s2 is not None
+            is_bye    = len(parts) == 1
+            clickable = len(parts) == 2
+            if is_bye:
+                p2_name = "Bye"
+            winner_id = None
+            if has_score and clickable:
+                winner_id = determine_bracket_winner(p1_id, s1, p2_id, s2, score_kind)
+            match_dicts.append({
+                "match_id":  mid,
+                "p1":        p1_name,
+                "p2":        p2_name,
+                "p1_id":     p1_id,
+                "p2_id":     p2_id,
+                "score":     f"{s1} - {s2}" if has_score else None,
+                "has_score": has_score,
+                "is_bye":    is_bye,
+                "clickable": clickable,
+                "winner_id": winner_id,
+            })
 
         rounds_list.append({"matches": match_dicts})
 
-    res = { "rounds": rounds_list, "id": stage_id }
-
-    return res
+    return {"rounds": rounds_list, "id": stage_id, "score_kind": score_kind}
