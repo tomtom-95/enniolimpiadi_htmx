@@ -2,9 +2,7 @@
     <div class="modal-underlay" _="on click trigger closeModal on body"></div>
     <div class="modal-content" _="on click halt the event's bubbling">
         <h3>{{ p1_name }} vs {{ p2_name }}</h3>
-        <form hx-put="{{ hx_action }}"
-              hx-target="{{ hx_target }}"
-              hx-swap="{{ hx_swap }}"
+        <form hx-put="/api/events/{{ event_id }}/matches/{{ match_id }}/score"
               _="on htmx:afterOnLoad trigger closeModal on body">
             <input type="hidden" name="p1_id" value="{{ p1_id }}">
             <input type="hidden" name="p2_id" value="{{ p2_id }}">
@@ -12,11 +10,13 @@
             {% if score_kind == "points" %}
                 <div class="score-modal-inputs">
                     <span class="score-modal-name">{{ p1_name }}</span>
-                    <input type="number" name="p1_score"
+                    <input type="number"
+                        name="p1_score"
                         value="{{ p1_score if p1_score is not none else '' }}"
                         min="0" autofocus class="modal-score-input">
                     <span class="score-modal-sep">–</span>
-                    <input type="number" name="p2_score"
+                    <input type="number"
+                        name="p2_score"
                         value="{{ p2_score if p2_score is not none else '' }}"
                         min="0" class="modal-score-input">
                     <span class="score-modal-name">{{ p2_name }}</span>

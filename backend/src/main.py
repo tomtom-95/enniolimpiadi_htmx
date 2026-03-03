@@ -20,15 +20,20 @@ from . import events
 from enum import Enum
 
 class Status(Enum):
-    SUCCESS               = "success"
-    OLYMPIAD_NOT_FOUND    = "olympiad_not_found"
-    OLYMPIAD_RENAMED      = "olympiad_renamed"
-    OLYMPIAD_NOT_SELECTED = "olympiad_not_selectec"
-    NOT_AUTHORIZED        = "not_authorized"
-    NAME_DUPLICATION      = "name_duplication"
-    INVALID_PIN           = "invalid_pin"
-    ENTITY_NOT_FOUND      = "entity_not_found"
-    ENTITY_RENAMED        = "entity_renamed"
+    SUCCESS                    = "success"
+    OLYMPIAD_NOT_FOUND         = "olympiad_not_found"
+    OLYMPIAD_RENAMED           = "olympiad_renamed"
+    OLYMPIAD_NOT_SELECTED      = "olympiad_not_selectec"
+    NOT_AUTHORIZED             = "not_authorized"
+    NAME_DUPLICATION           = "name_duplication"
+    INVALID_PIN                = "invalid_pin"
+    ENTITY_NOT_FOUND           = "entity_not_found"
+    ENTITY_RENAMED             = "entity_renamed"
+    EVENT_NOT_IN_REGISTRATION  = "event_not_in_registration"
+    EVENT_IN_REGISTRATION      = "event_in_registration"
+    EVENT_VERSION_OUTDATED     = "event_version_outdated"
+    STAGE_INVALID              = "stage_invalid"
+    NOT_ENOUGH_PARTICIPANTS    = "not_enough_participants"
 
 db_path = Path(os.environ["DATABASE_PATH"])
 schema_path = Path(os.environ["SCHEMA_PATH"])
@@ -81,21 +86,6 @@ def get_olympiad_from_request(request: Request) -> dict:
     return result
 
 
-def verify_olympiad_access(request, olympiad_id: int, olympiad_name: str):
-    conn = request.state.conn
-    session_id = request.state.session_id
-
-    row = conn.execute(
-        """
-        SELECT 1 FROM olympiads o
-        JOIN session_olympiad_auth soa ON soa.olympiad_id = o.id AND soa.session_id = ?
-        WHERE o.id = ? AND o.name = ?
-        """,
-        (session_id, olympiad_id, olympiad_name)
-    ).fetchone()
-    return row is not None
-
-
 def _oob_badge_html(request, olympiad_id: int):
     conn = request.state.conn
 
@@ -112,25 +102,25 @@ def _oob_badge_html(request, olympiad_id: int):
         return templates.get_template("olympiad_badge.html").render(olympiad=olympiad_badge_ctx, oob=True)
 
 
-def _render_access_denied(request, olympiad_id: int, olympiad_name: str):
+def _oob_event_status_html(request, event_id: int):
     conn = request.state.conn
+    event = conn.execute(
+        "SELECT current_stage_order FROM events WHERE id = ?",
+        (event_id,)
+    ).fetchone()
+    max_stage = conn.execute(
+        "SELECT MAX(stage_order) AS max_order FROM event_stages WHERE event_id = ?",
+        (event_id,)
+    ).fetchone()
+    max_stage_order = max_stage["max_order"] if max_stage else None
 
-    olympiad = conn.execute("SELECT * FROM olympiads WHERE id = ?", (olympiad_id,)).fetchone()
-    extra_headers = {}
-    if not olympiad:
-        html_content = templates.get_template("olympiad_not_found.html").render()
-        result = Status.OLYMPIAD_NOT_FOUND
-    elif olympiad["name"] != olympiad_name:
-        html_content = templates.get_template("olympiad_name_changed.html").render()
-        result = Status.OLYMPIAD_RENAMED
-    else:
-        extra_headers["HX-Pin-Required"] = "true"
-        extra_headers["HX-Retarget"] = "#modal-container"
-        extra_headers["HX-Reswap"] = "innerHTML"
-        html_content = templates.get_template("pin_modal.html").render(olympiad_id=olympiad_id)
-        result = Status.NOT_AUTHORIZED
+    event_status = derive_event_status(event["current_stage_order"], max_stage_order)
 
-    return result, html_content, extra_headers
+    event = {"id": event_id, "status": event_status}
+    html_content = templates.get_template("event_status_controls.html", oob=True)
+    html_content = html_content.render(event=event)
+
+    return html_content
 
 
 def _render_operation_denied(result, olympiad_id, entities):
@@ -138,11 +128,16 @@ def _render_operation_denied(result, olympiad_id, entities):
     extra_headers = {}
 
     needs_modal = (
-        result == Status.OLYMPIAD_NOT_FOUND     or
-        result == Status.OLYMPIAD_RENAMED       or
-        result == Status.NAME_DUPLICATION       or
-        result == Status.NOT_AUTHORIZED         or
-        result == Status.OLYMPIAD_NOT_SELECTED
+        result == Status.OLYMPIAD_NOT_FOUND          or
+        result == Status.OLYMPIAD_RENAMED            or
+        result == Status.NAME_DUPLICATION            or
+        result == Status.NOT_AUTHORIZED              or
+        result == Status.OLYMPIAD_NOT_SELECTED       or
+        result == Status.EVENT_NOT_IN_REGISTRATION   or
+        result == Status.EVENT_IN_REGISTRATION       or
+        result == Status.EVENT_VERSION_OUTDATED      or
+        result == Status.STAGE_INVALID               or
+        result == Status.NOT_ENOUGH_PARTICIPANTS
     )
 
     if needs_modal:
@@ -160,6 +155,14 @@ def _render_operation_denied(result, olympiad_id, entities):
     elif result == Status.NOT_AUTHORIZED:
         extra_headers["HX-Pin-Required"] = "true"
         html_content = templates.get_template("pin_modal.html").render(olympiad_id=olympiad_id)
+    elif result in (
+        Status.EVENT_NOT_IN_REGISTRATION,
+        Status.EVENT_VERSION_OUTDATED,
+        Status.STAGE_INVALID,
+        Status.NOT_ENOUGH_PARTICIPANTS,
+        Status.EVENT_IN_REGISTRATION
+    ):
+        html_content = templates.get_template("operation_failed.html").render(result=result.value)
 
     return html_content, extra_headers
 
@@ -237,13 +240,32 @@ def check_pin_valid(request: Request, olympiad_id: int, pin: str):
     return result
 
 
-def check_olympiad_auth(request, olympiad_id: int, olympiad_name: str):
-    result, response, extra_headers = Status.SUCCESS, None, None
+def check_event_in_registration(request: Request, event_id: int):
+    row = request.state.conn.execute(
+        "SELECT current_stage_order FROM events WHERE id = ?", (event_id,)
+    ).fetchone()
+    return row and row["current_stage_order"] == 0
 
-    if not verify_olympiad_access(request, olympiad_id, olympiad_name):
-        result, response, extra_headers = _render_access_denied(request, olympiad_id, olympiad_name)
 
-    return result, response, extra_headers
+def check_event_version(request: Request, event_id: int, version: int):
+    row = request.state.conn.execute(
+        "SELECT version FROM events WHERE id = ?", (event_id,)
+    ).fetchone()
+    return row and row["version"] == version
+
+
+def check_stage_kind_valid(request: Request, stage_id: int, event_id: int):
+    row = request.state.conn.execute(
+        "SELECT kind FROM event_stages WHERE id = ? AND event_id = ?", (stage_id, event_id)
+    ).fetchone()
+    return row and row["kind"] in ("groups", "round_robin")
+
+
+def check_min_participants(request: Request, event_id: int, min_count: int):
+    total = request.state.conn.execute(
+        "SELECT COUNT(*) as c FROM event_participants WHERE event_id = ?", (event_id,)
+    ).fetchone()["c"]
+    return total >= min_count
 
 
 _stage_subscribers: dict[int, set] = defaultdict(set)
@@ -487,79 +509,59 @@ def get_edit_score(
 ):
     conn = request.state.conn
 
-    score_rows = conn.execute(
-        "SELECT participant_id, score FROM match_participant_scores WHERE match_id = ?",
-        (match_id,)
-    ).fetchall()
-    score_map = {r["participant_id"]: r["score"] for r in score_rows}
-    p1_score = score_map.get(p1_id)
-    p2_score = score_map.get(p2_id)
+    olympiad_badge_ctx = get_olympiad_from_request(request)
+    olympiad_id = olympiad_badge_ctx["id"]
+    olympiad_name = olympiad_badge_ctx["name"]
 
-    def get_participant_name(pid):
-        row = conn.execute(
-            "SELECT COALESCE(pl.name, t.name) AS name FROM participants p "
-            "LEFT JOIN players pl ON pl.id = p.player_id "
-            "LEFT JOIN teams t ON t.id = p.team_id WHERE p.id = ?", (pid,)
-        ).fetchone()
-        return row["name"] if row else str(pid)
+    result = Status.SUCCESS
+    if not check_olympiad_exist(request, olympiad_id):
+        result = Status.OLYMPIAD_NOT_FOUND
+    if result == Status.SUCCESS and not check_olympiad_name(request, olympiad_id, olympiad_name):
+        result = Status.OLYMPIAD_RENAMED
+    if result == Status.SUCCESS and not check_entity_exist(request, "events", event_id):
+        result = Status.ENTITY_NOT_FOUND
+    if result == Status.SUCCESS and not check_entity_exist(request, "matches", match_id):
+        result = Status.ENTITY_NOT_FOUND
+    if result == Status.SUCCESS and check_event_in_registration(request, event_id):
+        result = Status.EVENT_IN_REGISTRATION
+    if result == Status.SUCCESS and not check_user_authorized(request, olympiad_id):
+        result = Status.NOT_AUTHORIZED
 
-    template_ctx = {
-        "event_id": event_id,
-        "match_id": match_id,
-        "p1_id": p1_id,
-        "p2_id": p2_id,
-        "p1_name": get_participant_name(p1_id),
-        "p2_name": get_participant_name(p2_id),
-        "score_kind": score_kind,
-        "p1_score": p1_score,
-        "p2_score": p2_score,
-        "hx_action": f"/api/events/{event_id}/matches/{match_id}/score",
-        "hx_target": f"#score-cell-{match_id}",
-        "hx_swap": "outerHTML",
-    }
-    return templates.TemplateResponse(request, "edit_score.html", template_ctx)
+    html_content, extra_headers = _render_operation_denied(result, olympiad_id, "events")
 
+    if result == Status.ENTITY_NOT_FOUND:
+        html_content = templates.get_template("entity_not_found.html").render()
+    elif result == Status.SUCCESS:
+        score_rows = conn.execute(
+            "SELECT participant_id, score FROM match_participant_scores WHERE match_id = ?",
+            (match_id,)
+        ).fetchall()
+        score_map = {r["participant_id"]: r["score"] for r in score_rows}
 
-@app.get("/api/events/{event_id}/matches/{match_id}/bracket-score/edit")
-def get_edit_bracket_score(
-    request: Request,
-    event_id: int,
-    match_id: int,
-    p1_id: int = Query(...),
-    p2_id: int = Query(...),
-    score_kind: str = Query(...)
-):
-    conn = request.state.conn
+        def get_participant_name(pid):
+            row = conn.execute(
+                "SELECT COALESCE(pl.name, t.name) AS name FROM participants p "
+                "LEFT JOIN players pl ON pl.id = p.player_id "
+                "LEFT JOIN teams t ON t.id = p.team_id WHERE p.id = ?", (pid,)
+            ).fetchone()
+            return row["name"] if row else str(pid)
 
-    score_rows = conn.execute(
-        "SELECT participant_id, score FROM match_participant_scores WHERE match_id = ?",
-        (match_id,)
-    ).fetchall()
-    score_map = {r["participant_id"]: r["score"] for r in score_rows}
+        template_ctx = {
+            "event_id": event_id,
+            "match_id": match_id,
+            "p1_id": p1_id,
+            "p2_id": p2_id,
+            "p1_name": get_participant_name(p1_id),
+            "p2_name": get_participant_name(p2_id),
+            "score_kind": score_kind,
+            "p1_score": score_map.get(p1_id),
+            "p2_score": score_map.get(p2_id),
+        }
+        html_content = templates.get_template("edit_score.html").render(**template_ctx)
 
-    def get_participant_name(pid):
-        row = conn.execute(
-            "SELECT COALESCE(pl.name, t.name) AS name FROM participants p "
-            "LEFT JOIN players pl ON pl.id = p.player_id "
-            "LEFT JOIN teams t ON t.id = p.team_id WHERE p.id = ?", (pid,)
-        ).fetchone()
-        return row["name"] if row else str(pid)
-
-    template_ctx = {
-        "event_id": event_id,
-        "match_id": match_id,
-        "p1_id": p1_id,
-        "p2_id": p2_id,
-        "p1_name": get_participant_name(p1_id),
-        "p2_name": get_participant_name(p2_id),
-        "score_kind": score_kind,
-        "p1_score": score_map.get(p1_id),
-        "p2_score": score_map.get(p2_id),
-        "hx_action": f"/api/events/{event_id}/matches/{match_id}/bracket-score",
-        "hx_target": "#stage-bracket-inner",
-        "hx_swap": "outerHTML",
-    }
-    return templates.TemplateResponse(request, "edit_score.html", template_ctx)
+    response = HTMLResponse(html_content)
+    response.headers.update(extra_headers)
+    return response
 
 
 @app.get("/api/events/{event_id}/matches/{match_id}/score/cancel-edit")
@@ -573,27 +575,49 @@ def cancel_edit_score(
 ):
     conn = request.state.conn
 
-    score_rows = conn.execute(
-        "SELECT participant_id, score FROM match_participant_scores WHERE match_id = ?",
-        (match_id,)
-    ).fetchall()
-    score_map = {r["participant_id"]: r["score"] for r in score_rows}
-    p1_score = score_map.get(p1_id)
-    p2_score = score_map.get(p2_id)
-    score_str = (
-        f"{p1_score} - {p2_score}"
-        if p1_score is not None and p2_score is not None else None
-    )
+    olympiad_badge_ctx = get_olympiad_from_request(request)
+    olympiad_id = olympiad_badge_ctx["id"]
+    olympiad_name = olympiad_badge_ctx["name"]
 
-    ctx = {
-        "event_id": event_id,
-        "match_id": match_id,
-        "p1_id": p1_id,
-        "p2_id": p2_id,
-        "score_kind": score_kind,
-        "score": score_str,
-    }
-    return templates.TemplateResponse(request, "score_cell.html", ctx)
+    result = Status.SUCCESS
+    if not check_olympiad_exist(request, olympiad_id):
+        result = Status.OLYMPIAD_NOT_FOUND
+    if result == Status.SUCCESS and not check_olympiad_name(request, olympiad_id, olympiad_name):
+        result = Status.OLYMPIAD_RENAMED
+    if result == Status.SUCCESS and not check_entity_exist(request, "events", event_id):
+        result = Status.ENTITY_NOT_FOUND
+    if result == Status.SUCCESS and not check_entity_exist(request, "matches", match_id):
+        result = Status.ENTITY_NOT_FOUND
+
+    html_content, extra_headers = _render_operation_denied(result, olympiad_id, "events")
+
+    if result == Status.ENTITY_NOT_FOUND:
+        html_content = templates.get_template("entity_not_found.html").render()
+    elif result == Status.SUCCESS:
+        score_rows = conn.execute(
+            "SELECT participant_id, score FROM match_participant_scores WHERE match_id = ?",
+            (match_id,)
+        ).fetchall()
+        score_map = {r["participant_id"]: r["score"] for r in score_rows}
+        p1_score = score_map.get(p1_id)
+        p2_score = score_map.get(p2_id)
+        score_str = (
+            f"{p1_score} - {p2_score}"
+            if p1_score is not None and p2_score is not None else None
+        )
+        ctx = {
+            "event_id": event_id,
+            "match_id": match_id,
+            "p1_id": p1_id,
+            "p2_id": p2_id,
+            "score_kind": score_kind,
+            "score": score_str,
+        }
+        html_content = templates.get_template("score_cell.html").render(**ctx)
+
+    response = HTMLResponse(html_content)
+    response.headers.update(extra_headers)
+    return response
 
 
 @app.put("/api/events/{event_id}/matches/{match_id}/score")
@@ -609,102 +633,105 @@ async def update_match_score(
     outcome: str = Form(None)
 ):
     conn = request.state.conn
+
+    olympiad_badge_ctx = get_olympiad_from_request(request)
+    olympiad_id = olympiad_badge_ctx["id"]
+    olympiad_name = olympiad_badge_ctx["name"]
+
     conn.execute("BEGIN IMMEDIATE")
 
-    if score_kind == "outcome":
-        if outcome == "p1":
-            p1_score, p2_score = 1, 0
-        elif outcome == "p2":
-            p1_score, p2_score = 0, 1
-        else:
-            p1_score, p2_score = 0, 0
+    result = Status.SUCCESS
+    if not check_olympiad_exist(request, olympiad_id):
+        result = Status.OLYMPIAD_NOT_FOUND
+    if result == Status.SUCCESS and not check_olympiad_name(request, olympiad_id, olympiad_name):
+        result = Status.OLYMPIAD_RENAMED
+    if result == Status.SUCCESS and not check_entity_exist(request, "events", event_id):
+        result = Status.ENTITY_NOT_FOUND
+    if result == Status.SUCCESS and not check_entity_exist(request, "matches", match_id):
+        result = Status.ENTITY_NOT_FOUND
+    # how is it possible that the match score still exist when I change the number of groups?
+    if result == Status.SUCCESS and not check_user_authorized(request, olympiad_id):
+        result = Status.NOT_AUTHORIZED
 
-    for pid, score in [(p1_id, p1_score), (p2_id, p2_score)]:
-        conn.execute(
-            "INSERT INTO match_participant_scores (match_id, participant_id, score) VALUES (?, ?, ?) "
-            "ON CONFLICT (match_id, participant_id) DO UPDATE SET score = excluded.score",
-            (match_id, pid, score)
-        )
+    html_content, extra_headers = _render_operation_denied(result, olympiad_id, "events")
 
-    conn.commit()
+    if result == Status.ENTITY_NOT_FOUND:
+        html_content = templates.get_template("entity_not_found.html").render()
+    elif result == Status.SUCCESS:
+        if score_kind == "outcome":
+            if outcome == "p1":
+                p1_score, p2_score = 1, 0
+            elif outcome == "p2":
+                p1_score, p2_score = 0, 1
+            else:
+                p1_score, p2_score = 0, 0
 
-    score_str = f"{p1_score} - {p2_score}"
+        for pid, score in [(p1_id, p1_score), (p2_id, p2_score)]:
+            conn.execute(
+                "INSERT INTO match_participant_scores (match_id, participant_id, score) VALUES (?, ?, ?) "
+                "ON CONFLICT (match_id, participant_id) DO UPDATE SET score = excluded.score",
+                (match_id, pid, score)
+            )
 
-    stage_row = conn.execute(
-        "SELECT g.event_stage_id FROM matches m JOIN groups g ON g.id = m.group_id WHERE m.id = ?",
-        (match_id,)
-    ).fetchone()
-    if stage_row:
+        stage_row = conn.execute(
+            "SELECT g.event_stage_id, es.kind FROM matches m "
+            "JOIN groups g ON g.id = m.group_id "
+            "JOIN event_stages es ON es.id = g.event_stage_id "
+            "WHERE m.id = ?",
+            (match_id,)
+        ).fetchone()
+        stage_id = stage_row["event_stage_id"]
+        stage_kind = stage_row["kind"]
+
+        if stage_kind == "single_elimination":
+            winner_id = events.determine_bracket_winner(p1_id, p1_score, p2_id, p2_score, score_kind)
+            events.advance_bracket_winner(conn, match_id, winner_id)
+
+        new_event_version = conn.execute(
+            "UPDATE events SET version = version + 1 WHERE id = ? RETURNING version",
+            (event_id,)
+        ).fetchone()["version"]
+
+        conn.commit()
+
         msg = "event: score-update\ndata: \n\n"
-        for queue in list(_stage_subscribers.get(stage_row["event_stage_id"], [])):
+        for queue in list(_stage_subscribers.get(stage_id, [])):
             queue.put_nowait(msg)
 
-    ctx = {
-        "event_id": event_id,
-        "match_id": match_id,
-        "p1_id": p1_id,
-        "p2_id": p2_id,
-        "score_kind": score_kind,
-        "score": score_str,
-    }
-    return templates.TemplateResponse(request, "score_cell.html", ctx)
-
-
-@app.put("/api/events/{event_id}/matches/{match_id}/bracket-score")
-async def update_bracket_score(
-    request: Request, event_id: int, match_id: int,
-    p1_id: int = Form(...), p2_id: int = Form(...), score_kind: str = Form(...),
-    p1_score: int = Form(None), p2_score: int = Form(None),
-    outcome: str = Form(None)
-):
-    conn = request.state.conn
-    conn.execute("BEGIN IMMEDIATE")
-
-    if score_kind == "outcome":
-        if outcome == "p1":
-            p1_score, p2_score = 1, 0
-        elif outcome == "p2":
-            p1_score, p2_score = 0, 1
+        if stage_kind == "single_elimination":
+            stage = events.present_single_elimination_stage(conn, stage_id)
+            html_content = templates.get_template("stage_single_elimination_inner.html")
+            html_content = html_content.render(stage=stage, event_id=event_id)
+            extra_headers["HX-Retarget"] = "#stage-bracket-inner"
         else:
-            p1_score, p2_score = 0, 0
+            stage = events.present_groups_stage(conn, stage_id)
+            html_content = templates.get_template("stage_groups_inner.html")
+            html_content = html_content.render(stage=stage, event_id=event_id, event_version=new_event_version)
+            extra_headers["HX-Retarget"] = "#stage-groups-inner"
 
-    for pid, score in [(p1_id, p1_score), (p2_id, p2_score)]:
-        conn.execute(
-            "INSERT INTO match_participant_scores (match_id, participant_id, score) VALUES (?, ?, ?) "
-            "ON CONFLICT (match_id, participant_id) DO UPDATE SET score = excluded.score",
-            (match_id, pid, score)
-        )
+        extra_headers["HX-Reswap"] = "outerHTML"
 
-    winner_id = events.determine_bracket_winner(p1_id, p1_score, p2_id, p2_score, score_kind)
-    events.advance_bracket_winner(conn, match_id, winner_id)
+    response = HTMLResponse(html_content)
+    response.headers.update(extra_headers)
 
-    conn.commit()
+    if result != Status.SUCCESS:
+        conn.rollback()
 
-    stage_row = conn.execute(
-        "SELECT g.event_stage_id FROM matches m JOIN groups g ON g.id = m.group_id WHERE m.id = ?",
-        (match_id,)
-    ).fetchone()
-    stage_id = stage_row["event_stage_id"]
-
-    msg = "event: score-update\ndata: \n\n"
-    for queue in list(_stage_subscribers.get(stage_id, [])):
-        queue.put_nowait(msg)
-
-    stage = events.present_single_elimination_stage(conn, stage_id)
-    return templates.TemplateResponse(request, "stage_single_elimination_inner.html", {
-        "stage": stage,
-        "event_id": event_id,
-    })
+    return response
 
 
 @app.get("/api/events/{event_id}/stages/{stage_id}/bracket-content")
 def get_bracket_content(request: Request, event_id: int, stage_id: int):
     conn = request.state.conn
     stage = events.present_single_elimination_stage(conn, stage_id)
-    return templates.TemplateResponse(request, "stage_single_elimination_inner.html", {
-        "stage": stage,
-        "event_id": event_id,
-    })
+    return templates.TemplateResponse(
+        request,
+        "stage_single_elimination_inner.html",
+        {
+            "stage": stage,
+            "event_id": event_id,
+        }
+    )
 
 
 def _cancel_edit(request: Request, entities: str, item_id: int, name: str):
@@ -1388,7 +1415,7 @@ def get_event_stage(request: Request, event_id: int, stage_order: int):
     elif result == Status.SUCCESS:
         row = conn.execute(
             """
-            SELECT e.current_stage_order, es.id, es.stage_order, es.kind, sk.label
+            SELECT e.current_stage_order, e.version AS event_version, es.id, es.stage_order, es.kind, sk.label
             FROM events e
             LEFT JOIN event_stages es ON es.event_id = e.id AND es.stage_order = ?
             LEFT JOIN stage_kinds sk ON sk.kind = es.kind
@@ -1425,6 +1452,7 @@ def get_event_stage(request: Request, event_id: int, stage_order: int):
                     total_stages=total_stages,
                     event_id=event_id,
                     stage_id=stage_id,
+                    event_version=row["event_version"],
                 )
 
     html_content += _oob_badge_html(request, olympiad_id)
@@ -1435,43 +1463,13 @@ def get_event_stage(request: Request, event_id: int, stage_order: int):
 
 
 @app.post("/api/events/{event_id}/stages/{stage_id}/resize")
-def resize_stage_groups(request: Request, event_id: int, stage_id: int, num_groups: int = Form(...)):
-    # when I am resizing the stage group it might be that some other admin meanwhile has changed the name
-    # of the event or might have deleted this stage or already changed the stage order
-    # In all these cases what the user is seeing is stale data that with the current strategy should be checked in
-    # the check phase. I am starting to wonder if this is the correct approach
-    # With the data I currently pass to the function I cannot even do all these checks
-    # I should pass to this endpoint the name of the event currently displayed to the frontend
-    # I should pass to this endpoint the num_groups size the user is currently seeing on the frontend
-    # Using the version field of the event row I do not think is a good solution because the version
-    # field might change for multiple reasons unrelated to the number of groups
-
-    # Would a realtime update solve this? In a real time updated I want a way to register the fact that the user
-    # is visualizing an event stage page for a group stage
-    # What I want is an update of the page in multiple places
-    #   - I want an "hook" that updates the Event name every time someone change it
-    #   - I want an "hook" that updates the event-status-control in case someone change the status of the event
-    #   - I want a way to update the event-stage panel is someone else deleted the stage I am working on or changes it
-    #   and so on ...
-    #   there is a ton of checks that must be done before doing anything but I am not even sure the update real time is the
-    #   way to go
-    # The htmx way would be to establish an sse connection and every element that could be modified by someone will listen
-    # to a specific event. This means, for example, that when an admin successfully resize the stage groups, the stage-groups-content
-    # template must be updated for all the user that are currently visualizing that particular stage of the event
-    # This works but assume that no-one will ever delete this stage. How do I handle the case in which a user delete the stage?
-    # In this case what should happen exactly? Let's start by the user experience: what I want to see as an user that is looking
-    # at this event stage?
-
-    #   Option1: SSE is setup so that as soon as someone delete the stage I am looking at a modal appears that informs me that
-    #            the stage has been eliminated. The modal has a reload button to reload the event. When pressed a request is made
-    #            to rerender the event_page.html for the event with the given event_id
-    #            In practice this means that the event_stage.html is listening to an event from the backend
-    #            (e.g. eventStageDeleted<stage_id>) and react as soon as this event is sent
-    #   Option2: keep all as it is and make the SSE only for the score update stuff
-
-    # Another event should be the creation of a new stage, this would require the update of the stage-nav, but I do not know man
-
-
+def resize_stage_groups(
+    request: Request,
+    event_id: int,
+    stage_id: int,
+    num_groups: int = Form(...),
+    event_version: int = Form(...)
+):
     conn = request.state.conn
 
     olympiad_badge_ctx = get_olympiad_from_request(request)
@@ -1491,37 +1489,28 @@ def resize_stage_groups(request: Request, event_id: int, stage_id: int, num_grou
         result = Status.ENTITY_NOT_FOUND
     if result == Status.SUCCESS and not check_user_authorized(request, olympiad_id):
         result = Status.NOT_AUTHORIZED
+    if result == Status.SUCCESS and not check_event_in_registration(request, event_id):
+        result = Status.EVENT_NOT_IN_REGISTRATION
+    if result == Status.SUCCESS and not check_event_version(request, event_id, event_version):
+        result = Status.EVENT_VERSION_OUTDATED
+    if result == Status.SUCCESS and not check_stage_kind_valid(request, stage_id, event_id):
+        result = Status.STAGE_INVALID
+    if result == Status.SUCCESS and not check_min_participants(request, event_id, 2):
+        result = Status.NOT_ENOUGH_PARTICIPANTS
 
     html_content, extra_headers = _render_operation_denied(result, olympiad_id, "events")
 
     if result == Status.ENTITY_NOT_FOUND:
-        html_content = templates.get_template("entity_deleted_oob.html").render()
+        html_content = templates.get_template("entity_not_found.html").render()
     elif result == Status.SUCCESS:
-        event_row = conn.execute(
-            "SELECT current_stage_order FROM events WHERE id = ?", (event_id,)
-        ).fetchone()
-        if not event_row or event_row["current_stage_order"] != 0:
-            html_content = "<div class='error-banner'>Resize consentito solo durante la registrazione</div>"
-        else:
-            stage_row = conn.execute(
-                "SELECT id, stage_order, kind FROM event_stages WHERE id = ? AND event_id = ?",
-                (stage_id, event_id)
-            ).fetchone()
-            if not stage_row or stage_row["kind"] not in ("groups", "round_robin"):
-                html_content = "<div class='error-banner'>Fase non trovata o già iniziata</div>"
-            else:
-                total = conn.execute(
-                    "SELECT COUNT(*) as c FROM event_participants WHERE event_id = ?",
-                    (event_id,)
-                ).fetchone()["c"]
-
-                if total < 2:
-                    html_content = "<div class='error-banner'>Servono almeno 2 partecipanti</div>"
-                else:
-                    events.generate_groups_stage(conn, stage_id, num_groups)
-                    stage = events.present_groups_stage(conn, stage_id)
-                    html_content = templates.get_template("stage_groups.html")
-                    html_content = html_content.render(stage=stage, event_id=event_id)
+        events.generate_groups_stage(conn, stage_id, num_groups)
+        new_version = conn.execute(
+            "UPDATE events SET version = version + 1 WHERE id = ? RETURNING version",
+            (event_id,)
+        ).fetchone()["version"]
+        stage = events.present_groups_stage(conn, stage_id)
+        html_content = templates.get_template("stage_groups.html")
+        html_content = html_content.render(stage=stage, event_id=event_id, event_version=new_version)
 
     html_content += _oob_badge_html(request, olympiad_id)
     response = HTMLResponse(html_content)
@@ -1543,12 +1532,16 @@ def resize_stage_groups(request: Request, event_id: int, stage_id: int, num_grou
 def get_stage_groups_content(request: Request, event_id: int, stage_id: int):
     conn = request.state.conn
     stage = events.present_groups_stage(conn, stage_id)
+    event_version = conn.execute(
+        "SELECT version FROM events WHERE id = ?", (event_id,)
+    ).fetchone()["version"]
     return templates.TemplateResponse(
         request,
         "stage_groups_inner.html",
         {
             "stage": stage,
             "event_id": event_id,
+            "event_version": event_version,
         }
     )
 
@@ -1605,6 +1598,10 @@ def update_event_score_kind(request: Request, event_id: int, score_kind: str = F
         result = Status.ENTITY_NOT_FOUND
     if result == Status.SUCCESS and not check_user_authorized(request, olympiad_id):
         result = Status.NOT_AUTHORIZED
+    
+    # here I am just looking at the score_kind that I want to use
+    # this endpoint have no idea if people have changed the score kind
+    # the first option I have is to 
 
     html_content, extra_headers = _render_operation_denied(result, olympiad_id, "events")
 

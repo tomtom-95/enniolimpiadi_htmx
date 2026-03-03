@@ -18,7 +18,7 @@
                 {% if match.clickable %}
                 <div class="bracket-match clickable"
                      style="grid-column: {{ r + 1 }}; grid-row: {{ row_start }} / span 2;"
-                     hx-get="/api/events/{{ event_id }}/matches/{{ match.match_id }}/bracket-score/edit?p1_id={{ match.p1_id }}&p2_id={{ match.p2_id }}&score_kind={{ stage.score_kind }}"
+                     hx-get="/api/events/{{ event_id }}/matches/{{ match.match_id }}/score/edit?p1_id={{ match.p1_id }}&p2_id={{ match.p2_id }}&score_kind={{ stage.score_kind }}"
                      hx-target="#modal-container"
                      hx-swap="innerHTML">
                 {% else %}

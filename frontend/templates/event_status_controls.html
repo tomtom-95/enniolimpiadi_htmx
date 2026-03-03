@@ -1,4 +1,7 @@
-<div id="event-status-controls">
+<div id="event-status-controls"
+    {% if oob %}
+        hx-swap-oob="true"
+    {% endif %}>
     <div class="event-status-badge {{ event.status }}">{{ event.status }}</div>
     {% if event.status == "registration" %}
         <button hx-post="/api/events/{{ event.id }}/start"

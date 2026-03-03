@@ -1,0 +1,1227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Tournament Manager</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0c10;
+    --surface: #12151c;
+    --surface-2: #1a1e28;
+    --surface-3: #222733;
+    --border: #2a2f3d;
+    --border-light: #353b4d;
+    --text: #e8eaf0;
+    --text-dim: #8890a4;
+    --text-muted: #555d73;
+    --accent: #f97316;
+    --accent-glow: rgba(249, 115, 22, 0.15);
+    --accent-soft: #fdba74;
+    --green: #22c55e;
+    --green-glow: rgba(34, 197, 94, 0.15);
+    --red: #ef4444;
+    --red-glow: rgba(239, 68, 68, 0.12);
+    --blue: #3b82f6;
+    --blue-glow: rgba(59, 130, 246, 0.12);
+    --radius: 14px;
+    --radius-sm: 10px;
+    --radius-xs: 7px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  body {
+    font-family: 'Outfit', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100dvh;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Phase timeline */
+  .phase-bar {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 16px 16px;
+    backdrop-filter: blur(20px);
+  }
+
+  .phase-bar h1 {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-dim);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+
+  .phase-steps {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+
+  .phase-step {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    position: relative;
+  }
+
+  .phase-step .dot {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 2px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-muted);
+    transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    z-index: 2;
+    background: var(--surface);
+  }
+
+  .phase-step.active .dot {
+    border-color: var(--accent);
+    color: var(--accent);
+    box-shadow: 0 0 0 4px var(--accent-glow), 0 0 20px var(--accent-glow);
+    background: var(--surface);
+  }
+
+  .phase-step.completed .dot {
+    border-color: var(--green);
+    background: var(--green);
+    color: #fff;
+  }
+
+  .phase-step .label {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-muted);
+    transition: color 0.3s;
+  }
+
+  .phase-step.active .label { color: var(--accent); font-weight: 600; }
+  .phase-step.completed .label { color: var(--green); }
+
+  .phase-connector {
+    width: 100%;
+    height: 2px;
+    background: var(--border);
+    flex: 0.5;
+    margin-bottom: 20px;
+    transition: background 0.4s;
+  }
+
+  .phase-connector.done { background: var(--green); }
+
+  /* Main content */
+  .main { padding: 16px; padding-bottom: 100px; position: relative; z-index: 1; }
+
+  /* Phase badge */
+  .phase-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    margin-bottom: 16px;
+  }
+
+  .phase-badge.registration { background: var(--accent-glow); color: var(--accent-soft); border: 1px solid rgba(249,115,22,0.2); }
+  .phase-badge.running { background: var(--green-glow); color: var(--green); border: 1px solid rgba(34,197,94,0.2); }
+  .phase-badge.ended { background: var(--blue-glow); color: var(--blue); border: 1px solid rgba(59,130,246,0.2); }
+
+  .phase-badge .pulse {
+    width: 6px; height: 6px; border-radius: 50%;
+    animation: pulse 2s infinite;
+  }
+  .phase-badge.registration .pulse { background: var(--accent); }
+  .phase-badge.running .pulse { background: var(--green); }
+  .phase-badge.ended .pulse { background: var(--blue); animation: none; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(0.7); }
+  }
+
+  /* Sections */
+  .section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 12px;
+    overflow: hidden;
+    transition: opacity 0.3s;
+  }
+
+  .section.locked { position: relative; }
+
+  .section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  .section-header:active { background: var(--surface-2); }
+
+  .section-title-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .section-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: var(--radius-xs);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    flex-shrink: 0;
+  }
+
+  .section-icon.config { background: rgba(249,115,22,0.12); }
+  .section-icon.stages { background: rgba(139,92,246,0.12); }
+  .section-icon.players { background: rgba(59,130,246,0.12); }
+  .section-icon.results { background: rgba(34,197,94,0.12); }
+
+  .section-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .section-subtitle {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-top: 1px;
+  }
+
+  .chevron {
+    color: var(--text-muted);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    font-size: 18px;
+    flex-shrink: 0;
+  }
+
+  .section.open .chevron { transform: rotate(180deg); }
+
+  .section-body {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .section.open .section-body { max-height: 2000px; }
+
+  .section-content { padding: 0 16px 16px; }
+
+  .lock-overlay {
+    display: none;
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(10, 12, 16, 0.55);
+    backdrop-filter: blur(2px);
+    z-index: 10;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius);
+  }
+
+  .section.locked .lock-overlay { display: flex; }
+
+  .lock-msg {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 10px 16px;
+    font-size: 13px;
+    color: var(--text-dim);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* Form elements */
+  .field { margin-bottom: 14px; }
+  .field:last-child { margin-bottom: 0; }
+
+  .field-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  select, input[type="text"], input[type="number"] {
+    width: 100%;
+    padding: 11px 14px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-xs);
+    color: var(--text);
+    font-family: 'Outfit', sans-serif;
+    font-size: 14px;
+    font-weight: 500;
+    outline: none;
+    transition: border-color 0.2s;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%238890a4' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: 32px;
+  }
+
+  select:focus, input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-glow);
+  }
+
+  /* Stage pipeline */
+  .stage-pipeline { display: flex; flex-direction: column; gap: 8px; }
+
+  .stage-card {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 14px;
+    transition: border-color 0.2s;
+  }
+
+  .stage-card:focus-within { border-color: var(--accent); }
+
+  .stage-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 8px;
+  }
+
+  .stage-card .field { margin-bottom: 10px; }
+
+  .stage-fields {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .stage-remove-btn {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-xs);
+    color: var(--red);
+    font-size: 12px;
+    font-weight: 500;
+    padding: 7px 0;
+    width: 100%;
+    cursor: pointer;
+    margin-top: 8px;
+    font-family: 'Outfit', sans-serif;
+    transition: all 0.2s;
+  }
+
+  .stage-remove-btn:active { background: var(--red-glow); }
+
+  .add-stage-btn {
+    width: 100%;
+    padding: 12px;
+    background: transparent;
+    border: 2px dashed var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-dim);
+    font-family: 'Outfit', sans-serif;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    margin-top: 8px;
+  }
+
+  .add-stage-btn:active { border-color: var(--accent); color: var(--accent); }
+
+  /* Player list */
+  .player-add-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+
+  .player-add-row input { flex: 1; }
+
+  .btn-add {
+    padding: 0 16px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius-xs);
+    font-family: 'Outfit', sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: transform 0.15s;
+  }
+
+  .btn-add:active { transform: scale(0.95); }
+
+  .player-count {
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-bottom: 10px;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .player-count span {
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  .player-list { display: flex; flex-direction: column; gap: 4px; }
+
+  .player-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    background: var(--surface-2);
+    border-radius: var(--radius-xs);
+    animation: slideIn 0.25s ease-out;
+  }
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .player-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .player-avatar {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background: var(--surface-3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-dim);
+  }
+
+  .player-name { font-size: 14px; font-weight: 500; }
+
+  .player-seed {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .btn-remove {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 18px;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 6px;
+    transition: all 0.15s;
+  }
+
+  .btn-remove:active { background: var(--red-glow); color: var(--red); }
+
+  /* Validation checklist */
+  .checklist {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom: 12px;
+  }
+
+  .checklist-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 12px;
+  }
+
+  .check-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 0;
+    font-size: 14px;
+    font-weight: 400;
+    color: var(--text-dim);
+    transition: color 0.3s;
+  }
+
+  .check-item.pass { color: var(--green); }
+  .check-item.fail { color: var(--text-muted); }
+
+  .check-dot {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 2px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    flex-shrink: 0;
+    transition: all 0.3s;
+  }
+
+  .check-item.pass .check-dot { border-color: var(--green); background: var(--green); color: #fff; }
+
+  /* Action buttons */
+  .action-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0; right: 0;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    padding: 12px 16px;
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+    z-index: 100;
+    backdrop-filter: blur(20px);
+  }
+
+  .btn-primary {
+    width: 100%;
+    padding: 14px;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-family: 'Outfit', sans-serif;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+    letter-spacing: 0.02em;
+  }
+
+  .btn-primary:active { transform: scale(0.98); }
+  .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+  .btn-start { background: var(--accent); color: #fff; }
+  .btn-end { background: var(--red); color: #fff; }
+  .btn-clone { background: var(--blue); color: #fff; }
+
+  /* Results section */
+  .match-card {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 14px;
+    margin-bottom: 8px;
+  }
+
+  .match-header {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: 'JetBrains Mono', monospace;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 10px;
+  }
+
+  .match-teams { display: flex; flex-direction: column; gap: 6px; }
+
+  .match-team {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 10px;
+    border-radius: var(--radius-xs);
+    font-size: 14px;
+    font-weight: 500;
+  }
+
+  .match-team.winner { background: var(--green-glow); color: var(--green); }
+  .match-team .score {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+    font-size: 16px;
+  }
+
+  /* Stats row */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+
+  .stat-card {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 14px;
+    text-align: center;
+  }
+
+  .stat-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--text);
+  }
+
+  .stat-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-top: 4px;
+  }
+
+  /* Confirmation modal */
+  .transition-modal {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(10,12,16,0.85);
+    backdrop-filter: blur(8px);
+    z-index: 200;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+
+  .transition-modal.show { display: flex; }
+
+  .modal-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px;
+    width: 100%;
+    max-width: 360px;
+    text-align: center;
+  }
+
+  .modal-card h3 { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+
+  .modal-card p {
+    font-size: 14px;
+    color: var(--text-dim);
+    margin-bottom: 20px;
+    line-height: 1.5;
+  }
+
+  .modal-actions { display: flex; gap: 8px; }
+
+  .modal-actions button {
+    flex: 1;
+    padding: 12px;
+    border-radius: var(--radius-xs);
+    font-family: 'Outfit', sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    transition: transform 0.15s;
+  }
+
+  .modal-actions button:active { transform: scale(0.97); }
+
+  .btn-cancel { background: var(--surface-2); color: var(--text-dim); border: 1px solid var(--border) !important; }
+  .btn-confirm-start { background: var(--accent); color: #fff; }
+  .btn-confirm-end { background: var(--red); color: #fff; }
+
+  /* Toast */
+  .toast {
+    position: fixed;
+    bottom: 80px;
+    left: 16px; right: 16px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 12px 16px;
+    font-size: 14px;
+    font-weight: 500;
+    z-index: 150;
+    transform: translateY(20px);
+    opacity: 0;
+    transition: all 0.3s ease;
+    text-align: center;
+  }
+
+  .toast.show { transform: translateY(0); opacity: 1; }
+
+  /* Subtle bg glow */
+  body::before {
+    content: '';
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: radial-gradient(ellipse at 50% 0%, rgba(249,115,22,0.04) 0%, transparent 60%);
+    pointer-events: none;
+    z-index: 0;
+    transition: background 0.6s;
+  }
+
+  body.phase-running::before {
+    background: radial-gradient(ellipse at 50% 0%, rgba(34,197,94,0.04) 0%, transparent 60%);
+  }
+
+  body.phase-ended::before {
+    background: radial-gradient(ellipse at 50% 0%, rgba(59,130,246,0.04) 0%, transparent 60%);
+  }
+</style>
+</head>
+<body class="phase-registration">
+
+<!-- Phase Bar -->
+<div class="phase-bar">
+  <h1>Tournament Setup</h1>
+  <div class="phase-steps">
+    <div class="phase-step active" data-phase="registration">
+      <div class="dot">1</div>
+      <div class="label">Setup</div>
+    </div>
+    <div class="phase-connector"></div>
+    <div class="phase-step" data-phase="running">
+      <div class="dot">2</div>
+      <div class="label">Running</div>
+    </div>
+    <div class="phase-connector"></div>
+    <div class="phase-step" data-phase="ended">
+      <div class="dot">3</div>
+      <div class="label">Ended</div>
+    </div>
+  </div>
+</div>
+
+<div class="main">
+
+  <!-- Phase Badge -->
+  <div class="phase-badge registration" id="phaseBadge">
+    <div class="pulse"></div>
+    <span>Registration Open</span>
+  </div>
+
+  <!-- SECTION: Config -->
+  <div class="section open" id="sectionConfig">
+    <div class="section-header" onclick="toggleSection('sectionConfig')">
+      <div class="section-title-row">
+        <div class="section-icon config">&#9881;</div>
+        <div>
+          <div class="section-title">Configuration</div>
+          <div class="section-subtitle">Score type &amp; general settings</div>
+        </div>
+      </div>
+      <div class="chevron">&#9660;</div>
+    </div>
+    <div class="section-body">
+      <div class="section-content">
+        <div class="field">
+          <div class="field-label">Tournament Name</div>
+          <input type="text" id="tournamentName" value="Spring Championship 2026" placeholder="Enter name...">
+        </div>
+        <div class="field">
+          <div class="field-label">Score Type</div>
+          <select id="scoreType">
+            <option value="points">Points (e.g. 3-1-0)</option>
+            <option value="goals">Goals</option>
+            <option value="sets">Sets (Best of N)</option>
+            <option value="custom">Custom</option>
+          </select>
+        </div>
+        <div class="field" id="setsField" style="display: none;">
+          <div class="field-label">Best Of</div>
+          <select id="bestOf">
+            <option value="3">Best of 3</option>
+            <option value="5">Best of 5</option>
+            <option value="7">Best of 7</option>
+          </select>
+        </div>
+        <div class="field" id="pointsField">
+          <div class="field-label">Points for Win / Draw / Loss</div>
+          <div style="display:flex; gap:8px;">
+            <input type="number" id="pWin" value="3" style="text-align:center">
+            <input type="number" id="pDraw" value="1" style="text-align:center">
+            <input type="number" id="pLoss" value="0" style="text-align:center">
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="lock-overlay"><div class="lock-msg">&#128274; Locked during tournament</div></div>
+  </div>
+
+  <!-- SECTION: Stages -->
+  <div class="section" id="sectionStages">
+    <div class="section-header" onclick="toggleSection('sectionStages')">
+      <div class="section-title-row">
+        <div class="section-icon stages">&#9878;</div>
+        <div>
+          <div class="section-title">Stages</div>
+          <div class="section-subtitle" id="stagesSummary">1 stage configured</div>
+        </div>
+      </div>
+      <div class="chevron">&#9660;</div>
+    </div>
+    <div class="section-body">
+      <div class="section-content">
+        <div class="stage-pipeline" id="stagePipeline"></div>
+        <button class="add-stage-btn" id="addStageBtn" onclick="addStage()">+ Add Stage</button>
+      </div>
+    </div>
+    <div class="lock-overlay"><div class="lock-msg">&#128274; Locked during tournament</div></div>
+  </div>
+
+  <!-- SECTION: Players -->
+  <div class="section" id="sectionPlayers">
+    <div class="section-header" onclick="toggleSection('sectionPlayers')">
+      <div class="section-title-row">
+        <div class="section-icon players">&#128101;</div>
+        <div>
+          <div class="section-title">Players</div>
+          <div class="section-subtitle" id="playersSummary">0 players</div>
+        </div>
+      </div>
+      <div class="chevron">&#9660;</div>
+    </div>
+    <div class="section-body">
+      <div class="section-content">
+        <div class="player-add-row" id="playerAddRow">
+          <input type="text" id="playerInput" placeholder="Player name..." onkeydown="if(event.key==='Enter')addPlayer()">
+          <button class="btn-add" onclick="addPlayer()">Add</button>
+        </div>
+        <div class="player-count">Registered: <span id="playerCountNum">0</span></div>
+        <div class="player-list" id="playerList"></div>
+      </div>
+    </div>
+    <div class="lock-overlay"><div class="lock-msg">&#128274; Locked during tournament</div></div>
+  </div>
+
+  <!-- SECTION: Results (hidden in registration) -->
+  <div class="section" id="sectionResults" style="display:none;">
+    <div class="section-header" onclick="toggleSection('sectionResults')">
+      <div class="section-title-row">
+        <div class="section-icon results">&#128202;</div>
+        <div>
+          <div class="section-title">Results</div>
+          <div class="section-subtitle" id="resultsSummary">Live matches</div>
+        </div>
+      </div>
+      <div class="chevron">&#9660;</div>
+    </div>
+    <div class="section-body">
+      <div class="section-content" id="resultsContent"></div>
+    </div>
+  </div>
+
+  <!-- Validation Checklist -->
+  <div class="checklist" id="validationChecklist">
+    <div class="checklist-title">Ready to Start?</div>
+    <div class="check-item fail" id="checkName">
+      <div class="check-dot">&#10003;</div>
+      Tournament named
+    </div>
+    <div class="check-item fail" id="checkScore">
+      <div class="check-dot">&#10003;</div>
+      Score type selected
+    </div>
+    <div class="check-item fail" id="checkStages">
+      <div class="check-dot">&#10003;</div>
+      At least 1 stage
+    </div>
+    <div class="check-item fail" id="checkPlayers">
+      <div class="check-dot">&#10003;</div>
+      Minimum 2 players
+    </div>
+  </div>
+
+  <!-- Stats (ended only) -->
+  <div id="statsSection" style="display:none;">
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-value" id="statMatches">0</div>
+        <div class="stat-label">Matches</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="statPlayers">0</div>
+        <div class="stat-label">Players</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="statWinner">&mdash;</div>
+        <div class="stat-label">Champion</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="statDuration">3d</div>
+        <div class="stat-label">Duration</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Action Bar -->
+<div class="action-bar">
+  <button class="btn-primary btn-start" id="btnAction" onclick="handleAction()" disabled>
+    Start Tournament
+  </button>
+</div>
+
+<!-- Confirmation Modal -->
+<div class="transition-modal" id="confirmModal">
+  <div class="modal-card">
+    <h3 id="modalTitle">Start Tournament?</h3>
+    <p id="modalDesc">Configuration and player list will be locked. This cannot be undone.</p>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal()">Cancel</button>
+      <button class="btn-confirm-start" id="modalConfirm" onclick="confirmAction()">Start</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+  // State
+  let currentPhase = 'registration';
+  let players = [];
+  let stages = [{ id: 1, format: 'group', groups: 2, advancePerGroup: 2 }];
+  let stageIdCounter = 2;
+
+  // Init
+  renderStages();
+  validate();
+
+  // Score type conditional fields
+  document.getElementById('scoreType').addEventListener('change', function() {
+    document.getElementById('setsField').style.display = this.value === 'sets' ? '' : 'none';
+    document.getElementById('pointsField').style.display = this.value === 'points' ? '' : 'none';
+    validate();
+  });
+
+  // Sections
+  function toggleSection(id) {
+    document.getElementById(id).classList.toggle('open');
+  }
+
+  // Stages
+  function renderStages() {
+    const pipeline = document.getElementById('stagePipeline');
+    pipeline.innerHTML = stages.map((s, i) => `
+      <div class="stage-card" data-id="${s.id}">
+        <div class="stage-num">Stage ${i + 1}</div>
+        <div class="field">
+          <div class="field-label">Format</div>
+          <select onchange="updateStage(${s.id}, 'format', this.value)">
+            <option value="round_robin" ${s.format === 'round_robin' ? 'selected' : ''}>Round Robin</option>
+            <option value="group" ${s.format === 'group' ? 'selected' : ''}>Group Stage</option>
+            <option value="single_elim" ${s.format === 'single_elim' ? 'selected' : ''}>Single Elimination</option>
+          </select>
+        </div>
+        ${s.format === 'group' ? `
+          <div class="stage-fields">
+            <div class="field">
+              <div class="field-label">Groups</div>
+              <input type="number" value="${s.groups || 2}" min="2" max="16"
+                onchange="updateStage(${s.id}, 'groups', +this.value)">
+            </div>
+            <div class="field">
+              <div class="field-label">Advance / grp</div>
+              <input type="number" value="${s.advancePerGroup || 2}" min="1" max="8"
+                onchange="updateStage(${s.id}, 'advancePerGroup', +this.value)">
+            </div>
+          </div>
+        ` : ''}
+        ${s.format === 'single_elim' ? `
+          <div class="field">
+            <div class="field-label">Third-place match</div>
+            <select onchange="updateStage(${s.id}, 'thirdPlace', this.value==='true')">
+              <option value="false" ${!s.thirdPlace ? 'selected' : ''}>No</option>
+              <option value="true" ${s.thirdPlace ? 'selected' : ''}>Yes</option>
+            </select>
+          </div>
+        ` : ''}
+        ${s.format === 'round_robin' ? `
+          <div class="field">
+            <div class="field-label">Legs</div>
+            <select onchange="updateStage(${s.id}, 'legs', +this.value)">
+              <option value="1" ${s.legs !== 2 ? 'selected' : ''}>Single (1 leg)</option>
+              <option value="2" ${s.legs === 2 ? 'selected' : ''}>Home &amp; Away (2 legs)</option>
+            </select>
+          </div>
+        ` : ''}
+        ${stages.length > 1 ? `<button class="stage-remove-btn" onclick="removeStage(${s.id})">Remove Stage</button>` : ''}
+      </div>
+    `).join('');
+
+    document.getElementById('stagesSummary').textContent = `${stages.length} stage${stages.length !== 1 ? 's' : ''} configured`;
+    validate();
+  }
+
+  function addStage() {
+    stages.push({ id: stageIdCounter++, format: 'single_elim', thirdPlace: false });
+    renderStages();
+  }
+
+  function removeStage(id) {
+    stages = stages.filter(s => s.id !== id);
+    renderStages();
+  }
+
+  function updateStage(id, key, val) {
+    const s = stages.find(s => s.id === id);
+    if (s) { s[key] = val; renderStages(); }
+  }
+
+  // Players
+  function addPlayer() {
+    const input = document.getElementById('playerInput');
+    const name = input.value.trim();
+    if (!name) return;
+    players.push({ name, id: Date.now() });
+    input.value = '';
+    renderPlayers();
+    validate();
+    showToast(`${name} added`);
+  }
+
+  function removePlayer(id) {
+    players = players.filter(p => p.id !== id);
+    renderPlayers();
+    validate();
+  }
+
+  function renderPlayers() {
+    const list = document.getElementById('playerList');
+    list.innerHTML = players.map((p, i) => `
+      <div class="player-item">
+        <div class="player-info">
+          <div class="player-avatar">${p.name.charAt(0).toUpperCase()}</div>
+          <div>
+            <div class="player-name">${p.name}</div>
+            <div class="player-seed">#${i + 1}</div>
+          </div>
+        </div>
+        ${currentPhase === 'registration' ? `<button class="btn-remove" onclick="removePlayer(${p.id})">&#10005;</button>` : ''}
+      </div>
+    `).join('');
+    document.getElementById('playerCountNum').textContent = players.length;
+    document.getElementById('playersSummary').textContent = `${players.length} player${players.length !== 1 ? 's' : ''}`;
+  }
+
+  // Validation
+  function validate() {
+    const checks = {
+      checkName: !!document.getElementById('tournamentName').value.trim(),
+      checkScore: true,
+      checkStages: stages.length > 0,
+      checkPlayers: players.length >= 2
+    };
+
+    Object.entries(checks).forEach(([id, pass]) => {
+      const el = document.getElementById(id);
+      el.classList.toggle('pass', pass);
+      el.classList.toggle('fail', !pass);
+    });
+
+    const allPass = Object.values(checks).every(Boolean);
+    const btn = document.getElementById('btnAction');
+    if (currentPhase === 'registration') btn.disabled = !allPass;
+  }
+
+  document.getElementById('tournamentName').addEventListener('input', validate);
+
+  // Phase transitions
+  function handleAction() {
+    if (currentPhase === 'registration') {
+      document.getElementById('modalTitle').textContent = 'Start Tournament?';
+      document.getElementById('modalDesc').textContent = `${players.length} players, ${stages.length} stage${stages.length > 1 ? 's' : ''}. Configuration will be locked.`;
+      document.getElementById('modalConfirm').className = 'btn-confirm-start';
+      document.getElementById('modalConfirm').textContent = 'Start';
+    } else if (currentPhase === 'running') {
+      document.getElementById('modalTitle').textContent = 'End Tournament?';
+      document.getElementById('modalDesc').textContent = 'Results will be finalized. This cannot be undone.';
+      document.getElementById('modalConfirm').className = 'btn-confirm-end';
+      document.getElementById('modalConfirm').textContent = 'End';
+    } else {
+      currentPhase = 'registration';
+      applyPhase();
+      showToast('Tournament cloned — edit and start fresh');
+      return;
+    }
+    document.getElementById('confirmModal').classList.add('show');
+  }
+
+  function closeModal() {
+    document.getElementById('confirmModal').classList.remove('show');
+  }
+
+  function confirmAction() {
+    closeModal();
+    if (currentPhase === 'registration') {
+      currentPhase = 'running';
+      showToast('Tournament started!');
+    } else if (currentPhase === 'running') {
+      currentPhase = 'ended';
+      showToast('Tournament ended');
+    }
+    applyPhase();
+  }
+
+  function applyPhase() {
+    document.body.className = `phase-${currentPhase}`;
+
+    // Timeline
+    const steps = document.querySelectorAll('.phase-step');
+    const connectors = document.querySelectorAll('.phase-connector');
+    const phases = ['registration', 'running', 'ended'];
+    const idx = phases.indexOf(currentPhase);
+
+    steps.forEach((s, i) => {
+      s.classList.remove('active', 'completed');
+      if (i < idx) s.classList.add('completed');
+      else if (i === idx) s.classList.add('active');
+    });
+    connectors.forEach((c, i) => c.classList.toggle('done', i < idx));
+
+    // Badge
+    const badge = document.getElementById('phaseBadge');
+    badge.className = `phase-badge ${currentPhase}`;
+    const labels = { registration: 'Registration Open', running: 'Tournament In Progress', ended: 'Tournament Ended' };
+    badge.querySelector('span').textContent = labels[currentPhase];
+
+    // Lock sections
+    ['sectionConfig', 'sectionStages', 'sectionPlayers'].forEach(id => {
+      document.getElementById(id).classList.toggle('locked', currentPhase !== 'registration');
+    });
+
+    // Player add row
+    document.getElementById('playerAddRow').style.display = currentPhase === 'registration' ? '' : 'none';
+    renderPlayers();
+
+    // Checklist
+    document.getElementById('validationChecklist').style.display = currentPhase === 'registration' ? '' : 'none';
+
+    // Results
+    document.getElementById('sectionResults').style.display = currentPhase !== 'registration' ? '' : 'none';
+    if (currentPhase !== 'registration') {
+      document.getElementById('sectionResults').classList.add('open');
+      renderResults();
+    }
+
+    // Stats
+    document.getElementById('statsSection').style.display = currentPhase === 'ended' ? '' : 'none';
+    if (currentPhase === 'ended') {
+      document.getElementById('statPlayers').textContent = players.length;
+      document.getElementById('statWinner').textContent = players.length ? players[0].name.split(' ')[0] : '\u2014';
+    }
+
+    // Action button
+    const btn = document.getElementById('btnAction');
+    if (currentPhase === 'registration') {
+      btn.textContent = 'Start Tournament';
+      btn.className = 'btn-primary btn-start';
+      btn.disabled = false;
+      validate();
+    } else if (currentPhase === 'running') {
+      btn.textContent = 'End Tournament';
+      btn.className = 'btn-primary btn-end';
+      btn.disabled = false;
+    } else {
+      btn.textContent = 'Clone & Create New';
+      btn.className = 'btn-primary btn-clone';
+      btn.disabled = false;
+    }
+  }
+
+  // Mock results
+  function renderResults() {
+    const content = document.getElementById('resultsContent');
+    if (players.length < 2) {
+      content.innerHTML = '<p style="color:var(--text-dim);font-size:14px">No matches yet.</p>';
+      return;
+    }
+
+    const matchups = [];
+    for (let i = 0; i < players.length - 1; i += 2) {
+      matchups.push([players[i], players[i + 1]]);
+    }
+
+    content.innerHTML = matchups.map((m, i) => {
+      const s1 = Math.floor(Math.random() * 4);
+      const s2 = Math.floor(Math.random() * 4);
+      const w = s1 >= s2 ? 0 : 1;
+      return `
+        <div class="match-card">
+          <div class="match-header">Match ${i + 1} &middot; ${stages[0]?.format === 'group' ? 'Group A' : 'Round 1'}</div>
+          <div class="match-teams">
+            <div class="match-team ${w === 0 && currentPhase === 'ended' ? 'winner' : ''}">
+              <span>${m[0].name}</span>
+              <span class="score">${s1}</span>
+            </div>
+            <div class="match-team ${w === 1 && currentPhase === 'ended' ? 'winner' : ''}">
+              <span>${m[1].name}</span>
+              <span class="score">${s2}</span>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    document.getElementById('resultsSummary').textContent = currentPhase === 'ended' ? 'Final results' : 'Live matches';
+    document.getElementById('statMatches').textContent = matchups.length;
+  }
+
+  // Toast
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2200);
+  }
+</script>
+</body>
+</html>

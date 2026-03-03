@@ -9,7 +9,7 @@
             <div class="group-resize-controls">
                 {% if num_groups > 1 %}
                     <button hx-post="/api/events/{{ event_id }}/stages/{{ stage.id }}/resize"
-                        hx-vals='{"num_groups": {{ num_groups - 1 }}}'
+                        hx-vals='{"num_groups": {{ num_groups - 1 }}, "event_version": {{ event_version }}}'
                         hx-target="#stage-groups-content"
                         hx-swap="outerHTML"
                         class="group-resize-btn">
@@ -21,7 +21,7 @@
                 <span class="group-resize-value">{{ num_groups }}</span>
                 {% if num_groups < stage.total_participants // 2 %}
                     <button hx-post="/api/events/{{ event_id }}/stages/{{ stage.id }}/resize"
-                        hx-vals='{"num_groups": {{ num_groups + 1 }}}'
+                        hx-vals='{"num_groups": {{ num_groups + 1 }}, "event_version": {{ event_version }}}'
                         hx-target="#stage-groups-content"
                         hx-swap="outerHTML"
                         class="group-resize-btn">
