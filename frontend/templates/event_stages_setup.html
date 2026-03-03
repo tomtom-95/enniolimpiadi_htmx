@@ -1,27 +1,88 @@
-<div id="stages-setup-section">
-    <div class="modal-subsection">
-        {% for sk in stage_kinds %}
-            <div class="entity-element modal-list-item"
-                hx-post="/api/events/{{ event_id }}/stages"
-                hx-vals='{"kind":"{{ sk.kind }}"}'
-                hx-target="#stages-setup-section"
-                hx-swap="outerHTML">
-                <span>{{ sk.label }}</span>
-                <span class="modal-add-btn">+</span>
-            </div>
-        {% endfor %}
-    </div>
-    {% if stages %}
-        <div class="modal-subsection">
+<div name="kind" class="stage-kind-select-inline">
+    <div id="stages-setup-section">
+        <div class="stage-setup-pipeline">
             {% for stage in stages %}
-                <div class="entity-element modal-list-item">
-                    <span>Fase {{ stage.stage_order }} — {{ stage.label }}</span>
-                    <button class="btn-remove-stage" hx-delete="/api/events/{{ event_id }}/stages/{{ stage.id }}"
-                        hx-target="#stages-setup-section" hx-swap="outerHTML">
-                        &#10005;
+                <div class="stage-setup-card">
+                    <div class="stage-setup-card-header">
+                        <span class="stage-setup-num">Fase {{ stage.stage_order }}</span>
+                    </div>
+                    <select name="kind"
+                        class="stage-kind-select-inline"
+                        hx-patch="/api/events/{{ event_id }}/stages/{{ stage.id }}"
+                        hx-trigger="change"
+                        hx-target="#stages-setup-section"
+                        hx-swap="outerHTML">
+                        {% for sk in stage_kinds %}
+                            <option value="{{ sk.kind }}" {{ 'selected' if sk.kind == stage.kind }}>{{ sk.label }}</option>
+                        {% endfor %}
+                    </select>
+                    {% if stage.kind == 'groups' %}
+                        <div class="stage-groups-setup">
+                            <span class="stage-groups-setup-label">Gironi</span>
+                            <div class="group-resize-controls">
+                                {% if stage.num_groups > 1 %}
+                                    <button class="group-resize-btn"
+                                        hx-post="/api/events/{{ event_id }}/stages/{{ stage.id }}/num-groups"
+                                        hx-vals='{"num_groups": {{ stage.num_groups - 1 }}}'
+                                        hx-target="#stages-setup-section"
+                                        hx-swap="outerHTML">
+                                        &minus;
+                                    </button>
+                                {% else %}
+                                    <button class="group-resize-btn" disabled>&minus;</button>
+                                {% endif %}
+                                <span class="group-resize-value">{{ stage.num_groups }}</span>
+                                <button class="group-resize-btn"
+                                    hx-post="/api/events/{{ event_id }}/stages/{{ stage.id }}/num-groups"
+                                    hx-vals='{"num_groups": {{ stage.num_groups + 1 }}}'
+                                    hx-target="#stages-setup-section"
+                                    hx-swap="outerHTML">
+                                    &plus;
+                                </button>
+                            </div>
+                        </div>
+                    {% endif %}
+                    <button class="btn-remove-stage"
+                        hx-delete="/api/events/{{ event_id }}/stages/{{ stage.id }}"
+                        hx-target="#stages-setup-section"
+                        hx-swap="outerHTML">
+                        Rimuovi questa fase
                     </button>
                 </div>
             {% endfor %}
+
+            <div id="stage-draft-wrapper" style="display: none;">
+                {% if stages %}
+                    <div class="stage-setup-arrow">&#8595;</div>
+                {% endif %}
+                <div class="stage-setup-card">
+                    <div class="stage-setup-card-header">
+                        <span class="stage-setup-num">Fase {{ (stages | length) + 1 }}</span>
+                        <button type="button" class="btn-remove-stage"
+                            _="on click hide #stage-draft-wrapper then show #btn-add-stage">
+                            &#10005;
+                        </button>
+                    </div>
+                    <form hx-post="/api/events/{{ event_id }}/stages"
+                        hx-target="#stages-setup-section"
+                        hx-swap="outerHTML">
+                        <div class="stage-kind-field">
+                            <div class="stage-groups-setup-label">Tipo di fase</div>
+                            <select name="kind" class="stage-kind-select-inline">
+                                {% for sk in stage_kinds %}
+                                    <option value="{{ sk.kind }}">{{ sk.label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <button type="submit" class="btn-confirm-stage">Aggiungi fase</button>
+                    </form>
+                </div>
+            </div>
+
+            <button id="btn-add-stage" class="btn-add-stage"
+                _="on click hide me then show #stage-draft-wrapper">
+                + Aggiungi fase
+            </button>
         </div>
-    {% endif %}
+    </div>
 </div>

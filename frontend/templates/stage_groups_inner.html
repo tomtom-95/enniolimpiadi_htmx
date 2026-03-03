@@ -2,38 +2,6 @@
     hx-trigger="sse:score-update"
     hx-get="/api/events/{{ event_id }}/stages/{{ stage.id }}/groups-content"
     hx-swap="outerHTML">
-    {% if stage.total_participants >= 2 %}
-        {% set num_groups = stage.groups | length %}
-        <div class="group-resize-bar">
-            <span class="group-resize-label">Numero di gironi:</span>
-            <div class="group-resize-controls">
-                {% if num_groups > 1 %}
-                    <button hx-post="/api/events/{{ event_id }}/stages/{{ stage.id }}/resize"
-                        hx-vals='{"num_groups": {{ num_groups - 1 }}, "event_version": {{ event_version }}}'
-                        hx-target="#stage-groups-content"
-                        hx-swap="outerHTML"
-                        class="group-resize-btn">
-                        &minus;
-                    </button>
-                {% else %}
-                    <button class="group-resize-btn" disabled>&minus;</button>
-                {% endif %}
-                <span class="group-resize-value">{{ num_groups }}</span>
-                {% if num_groups < stage.total_participants // 2 %}
-                    <button hx-post="/api/events/{{ event_id }}/stages/{{ stage.id }}/resize"
-                        hx-vals='{"num_groups": {{ num_groups + 1 }}, "event_version": {{ event_version }}}'
-                        hx-target="#stage-groups-content"
-                        hx-swap="outerHTML"
-                        class="group-resize-btn">
-                        &plus;
-                    </button>
-                {% else %}
-                    <button class="group-resize-btn" disabled>&plus;</button>
-                {% endif %}
-            </div>
-        </div>
-    {% endif %}
-
     <div class="stage-groups">
     {% for group in stage.groups %}
         <div class="group-card">

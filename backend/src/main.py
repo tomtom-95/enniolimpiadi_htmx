@@ -1524,6 +1524,123 @@ def resize_stage_groups(
     return response
 
 
+@app.patch("/api/events/{event_id}/stages/{stage_id}")
+def update_stage_kind(
+    request: Request,
+    event_id: int,
+    stage_id: int,
+    kind: str = Form(...),
+):
+    conn = request.state.conn
+
+    olympiad_badge_ctx = get_olympiad_from_request(request)
+    olympiad_id = olympiad_badge_ctx["id"]
+    olympiad_name = olympiad_badge_ctx["name"]
+
+    assert olympiad_id != 0
+
+    conn.execute("BEGIN IMMEDIATE")
+
+    result = Status.SUCCESS
+    if not check_olympiad_exist(request, olympiad_id):
+        result = Status.OLYMPIAD_NOT_FOUND
+    if result == Status.SUCCESS and not check_olympiad_name(request, olympiad_id, olympiad_name):
+        result = Status.OLYMPIAD_RENAMED
+    if result == Status.SUCCESS and not check_entity_exist(request, "events", event_id):
+        result = Status.ENTITY_NOT_FOUND
+    if result == Status.SUCCESS and not check_user_authorized(request, olympiad_id):
+        result = Status.NOT_AUTHORIZED
+    if result == Status.SUCCESS and not check_event_in_registration(request, event_id):
+        result = Status.EVENT_NOT_IN_REGISTRATION
+
+    html_content, extra_headers = _render_operation_denied(result, olympiad_id, "events")
+
+    if result == Status.ENTITY_NOT_FOUND:
+        html_content = templates.get_template("entity_not_found.html").render()
+    elif result == Status.SUCCESS:
+        stage_order = conn.execute(
+            "SELECT stage_order FROM event_stages WHERE id = ? AND event_id = ?",
+            (stage_id, event_id)
+        ).fetchone()["stage_order"]
+
+        conn.execute("DELETE FROM event_stages WHERE id = ?", (stage_id,))
+
+        new_id = conn.execute(
+            "INSERT INTO event_stages (event_id, kind, stage_order) VALUES (?, ?, ?) RETURNING id",
+            (event_id, kind, stage_order)
+        ).fetchone()["id"]
+
+        if stage_order == 1:
+            if kind == "groups":
+                events.generate_groups_stage(conn, new_id, 1)
+            elif kind == "single_elimination":
+                events.generate_single_elimination_stage(conn, new_id)
+
+        html_content = _render_stages_section_html(conn, event_id)
+
+    html_content += _oob_badge_html(request, olympiad_id)
+    response = HTMLResponse(html_content)
+    response.headers.update(extra_headers)
+
+    if result == Status.SUCCESS:
+        conn.commit()
+    else:
+        conn.rollback()
+
+    return response
+
+
+@app.post("/api/events/{event_id}/stages/{stage_id}/num-groups")
+def set_stage_num_groups(
+    request: Request,
+    event_id: int,
+    stage_id: int,
+    num_groups: int = Form(...),
+):
+    conn = request.state.conn
+
+    olympiad_badge_ctx = get_olympiad_from_request(request)
+    olympiad_id = olympiad_badge_ctx["id"]
+    olympiad_name = olympiad_badge_ctx["name"]
+
+    assert olympiad_id != 0
+
+    conn.execute("BEGIN IMMEDIATE")
+
+    result = Status.SUCCESS
+    if not check_olympiad_exist(request, olympiad_id):
+        result = Status.OLYMPIAD_NOT_FOUND
+    if result == Status.SUCCESS and not check_olympiad_name(request, olympiad_id, olympiad_name):
+        result = Status.OLYMPIAD_RENAMED
+    if result == Status.SUCCESS and not check_entity_exist(request, "events", event_id):
+        result = Status.ENTITY_NOT_FOUND
+    if result == Status.SUCCESS and not check_user_authorized(request, olympiad_id):
+        result = Status.NOT_AUTHORIZED
+    if result == Status.SUCCESS and not check_event_in_registration(request, event_id):
+        result = Status.EVENT_NOT_IN_REGISTRATION
+    if result == Status.SUCCESS and not check_stage_kind_valid(request, stage_id, event_id):
+        result = Status.STAGE_INVALID
+
+    html_content, extra_headers = _render_operation_denied(result, olympiad_id, "events")
+
+    if result == Status.ENTITY_NOT_FOUND:
+        html_content = templates.get_template("entity_not_found.html").render()
+    elif result == Status.SUCCESS:
+        events.generate_groups_stage(conn, stage_id, max(1, num_groups))
+        html_content = _render_stages_section_html(conn, event_id)
+
+    html_content += _oob_badge_html(request, olympiad_id)
+    response = HTMLResponse(html_content)
+    response.headers.update(extra_headers)
+
+    if result == Status.SUCCESS:
+        conn.commit()
+    else:
+        conn.rollback()
+
+    return response
+
+
 # ---------------------------------------------------------------------------
 # Stage groups content (used by SSE-triggered refresh)
 # ---------------------------------------------------------------------------
@@ -1599,9 +1716,17 @@ def update_event_score_kind(request: Request, event_id: int, score_kind: str = F
     if result == Status.SUCCESS and not check_user_authorized(request, olympiad_id):
         result = Status.NOT_AUTHORIZED
     
-    # here I am just looking at the score_kind that I want to use
-    # this endpoint have no idea if people have changed the score kind
-    # the first option I have is to 
+    # here I am just looking at the score_kind that I want to use.
+    # This endpoint have no idea if people have changed the score kind
+    # An admin might have changed the tournament state into the running phase
+    # To realize this, this endpoint have to check the status of the event with event_id
+    # in the db, render the usual error modal if we are not in the setup phase and
+    # rerender the event_page.html for this event entirely
+
+    # please stop think about sse or I will never finish this fucking application
+    # What I want to do in this case is: check if we are in the setup phase
+    #   - if yes: update score kind (do not care about previous score kind, just set score kind to whatever here is defined)
+    #   - if no: modal that reload the event_page.html
 
     html_content, extra_headers = _render_operation_denied(result, olympiad_id, "events")
 
@@ -1659,7 +1784,8 @@ def get_event_setup(request: Request, event_id: int, version: int = Query(...)):
         ).fetchall()
 
         stages = conn.execute(
-            "SELECT es.id, es.stage_order, es.kind, sk.label "
+            "SELECT es.id, es.stage_order, es.kind, sk.label, "
+            "COALESCE((SELECT COUNT(*) FROM groups g WHERE g.event_stage_id = es.id), 0) AS num_groups "
             "FROM event_stages es JOIN stage_kinds sk ON sk.kind = es.kind "
             "WHERE es.event_id = ? ORDER BY es.stage_order",
             (event_id,)
@@ -1807,7 +1933,8 @@ def _render_stages_section_html(conn, event_id):
 
     stages = conn.execute(
         """
-        SELECT es.id, es.stage_order, es.kind, sk.label
+        SELECT es.id, es.stage_order, es.kind, sk.label,
+               COALESCE((SELECT COUNT(*) FROM groups g WHERE g.event_stage_id = es.id), 0) AS num_groups
         FROM event_stages es JOIN stage_kinds sk ON sk.kind = es.kind
         WHERE es.event_id = ? ORDER BY es.stage_order
         """,

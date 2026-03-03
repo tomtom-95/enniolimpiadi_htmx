@@ -694,6 +694,7 @@ body {
     flex-direction: column;
     flex: 1;
     min-height: 0;
+    overflow: hidden;
     background-color: #f4f1ed;
     margin: -15px;
     padding: 15px;
@@ -706,77 +707,145 @@ body {
 }
 
 #event-status-controls {
+    margin-bottom: 0.75rem;
+}
+
+/*
+ * Event phase bar
+ */
+.event-phase-bar {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
-    margin-bottom: 1rem;
+    gap: 1rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid #e0dbd3;
 }
 
-.event-status-badge {
-    display: inline-block;
-    padding: 0.25rem 0.75rem;
-    border-radius: 4px;
-    font-size: 0.8rem;
-    font-weight: 600;
-    text-transform: uppercase;
+.event-phase-steps {
+    display: flex;
+    align-items: center;
+    flex: 1;
+    min-width: 0;
 }
 
-.event-status-badge.registration {
-    background-color: #d1ecf1;
-    color: #0c5460;
-}
-
-.event-status-badge.started {
-    background-color: #fff3cd;
-    color: #856404;
-}
-
-.event-status-badge.finished {
-    background-color: #d4edda;
-    color: #155724;
-}
-
-.event-tabs {
+.event-phase-step {
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
-    margin-bottom: 1rem;
+    align-items: center;
+    gap: 5px;
 }
 
-.event-tab {
-    padding: 0.5rem 1.25rem;
-    font-size: 0.95rem;
-    color: #2d2a4a;
-    background-color: transparent;
-    border: 2px solid #2d2a4a;
-    border-radius: 4px;
-    transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+.event-phase-dot {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 2px solid #c8c4d4;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    color: #9995a8;
+    background: #faf5eb;
+    transition: all 0.25s ease;
+    flex-shrink: 0;
 }
 
-.event-tab:hover {
-    background-color: rgba(45, 42, 74, 0.1);
+.event-phase-label {
+    font-size: 10px;
+    font-weight: 600;
+    color: #9995a8;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
 }
 
-.event-tab:disabled {
-    opacity: 0.35;
-    cursor: not-allowed;
+.event-phase-conn {
+    flex: 1;
+    height: 2px;
+    background: #e0dbd3;
+    margin-bottom: 20px;
+    transition: background 0.3s ease;
+    min-width: 12px;
 }
 
-.event-tab:disabled:hover {
-    background-color: transparent;
+.event-phase-conn.done {
+    background: #2d9c5e;
 }
 
-.event-tab.active {
+.event-phase-step.active .event-phase-dot {
+    border-color: #e85d4c;
+    color: #e85d4c;
+    box-shadow: 0 0 0 3px rgba(232, 93, 76, 0.15);
+}
+
+.event-phase-step.active .event-phase-label {
+    color: #e85d4c;
+    font-weight: 700;
+}
+
+.event-phase-step.completed .event-phase-dot {
+    border-color: #2d9c5e;
+    background: #2d9c5e;
     color: #fff;
-    background-color: #2d2a4a;
-    border-color: #2d2a4a;
 }
+
+.event-phase-step.completed .event-phase-label {
+    color: #2d9c5e;
+}
+
+.event-page-action {
+    display: flex;
+    margin: 0 -15px -15px;
+    padding: 12px 15px;
+    background: #f4f1ed;
+    border-top: 1px solid #e0dbd3;
+    flex-shrink: 0;
+}
+
+.event-phase-btn {
+    padding: 0.4rem 0.85rem;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    border: 2px solid;
+    transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+    white-space: nowrap;
+    cursor: pointer;
+    font-family: 'Space Grotesk', system-ui, sans-serif;
+    flex-grow: 1;
+}
+
+.event-phase-btn.phase-btn-start {
+    background-color: #e85d4c;
+    color: #fff;
+    border-color: #e85d4c;
+}
+
+.event-phase-btn.phase-btn-start:hover {
+    background-color: #c94a3a;
+    border-color: #c94a3a;
+}
+
+.event-phase-btn.phase-btn-back {
+    background-color: transparent;
+    color: #9995a8;
+    border-color: #c8c4d4;
+}
+
+.event-phase-btn.phase-btn-back:hover {
+    background-color: rgba(45, 42, 74, 0.06);
+    color: #2d2a4a;
+    border-color: #9995a8;
+}
+
 
 .event-layout {
     display: flex;
     flex-direction: column;
     flex: 1;
     min-height: 0;
+    overflow-y: auto;
 }
 
 /*
@@ -810,7 +879,6 @@ body {
     display: flex;
     flex-direction: column;
     flex: 1 1 0;
-    overflow-y: auto;
     min-height: 0;
 }
 
@@ -890,6 +958,11 @@ body {
 /*
  * Event stages panel (right side)
  */
+
+#stages-setup-section {
+    display: flex;
+    flex-grow: 1;
+}
 
 #stage-content {
     flex: 1;
@@ -992,22 +1065,8 @@ html.slide-back::view-transition-new(stage-slide) {
 }
 
 /*
- * Group resize controls
+ * Group resize controls (used in stage setup pipeline)
  */
-.group-resize-bar {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.75rem;
-    padding: 0.75rem 0;
-}
-
-.group-resize-label {
-    font-weight: 600;
-    font-size: 0.95rem;
-    color: #2d2a4a;
-}
-
 .group-resize-controls {
     display: flex;
     align-items: center;
@@ -1015,8 +1074,8 @@ html.slide-back::view-transition-new(stage-slide) {
 }
 
 .group-resize-btn {
-    width: 40px;
-    height: 40px;
+    width: 20px;
+    height: 20px;
     font-size: 1.25rem;
     font-weight: 700;
     color: #fff;
@@ -1399,8 +1458,8 @@ html.slide-back::view-transition-new(stage-slide) {
 }
 
 .btn-remove-stage {
-    width: 32px;
-    height: 32px;
+    flex-grow: 1;
+    align-items: center;
     padding: 0;
     font-size: 1rem;
     font-weight: 700;
@@ -1415,4 +1474,119 @@ html.slide-back::view-transition-new(stage-slide) {
 .btn-remove-stage:hover {
     background-color: #e85d4c;
     color: #fff;
+}
+
+/*
+ * Stage setup pipeline
+ */
+.stage-setup-pipeline {
+    display: flex;
+    flex-direction: column;
+    flex-grow: 1;
+}
+
+.stage-setup-card {
+    display: flex;
+    flex-direction: column;
+    background: #fff;
+    border: 2px solid #2d2a4a;
+    align-items: center;
+}
+
+.stage-setup-card-header {
+    display: flex;
+    align-items: center;
+}
+
+.stage-setup-num {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #9995a8;
+}
+
+.stage-setup-kind-label {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #2d2a4a;
+}
+
+.stage-groups-setup {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 0.6rem;
+    padding-top: 0.6rem;
+    border-top: 1px solid #e8e3da;
+}
+
+.stage-groups-setup-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #9995a8;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.stage-setup-arrow {
+    text-align: center;
+    color: #9995a8;
+    font-size: 1.1rem;
+    line-height: 1.6;
+    user-select: none;
+}
+
+.btn-add-stage {
+    width: 100%;
+    padding: 0.6rem 1rem;
+    border: 2px dashed #9995a8;
+    border-radius: 4px;
+    background: transparent;
+    color: #9995a8;
+    font-size: 0.9rem;
+    font-weight: 600;
+    transition: border-color 0.2s ease, color 0.2s ease;
+}
+
+.btn-add-stage:hover {
+    border-color: #2d2a4a;
+    color: #2d2a4a;
+}
+
+.stage-kind-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin-bottom: 0.75rem;
+}
+
+.stage-kind-select-inline {
+    display: flex;
+    padding: 0.5rem 0.75rem;
+    border: 2px solid #2d2a4a;
+    border-radius: 4px;
+    font-family: 'Space Grotesk', system-ui, sans-serif;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: #2d2a4a;
+    background-color: #fff;
+    cursor: pointer;
+}
+
+.btn-confirm-stage {
+    width: 100%;
+    padding: 0.5rem;
+    background-color: #2d2a4a;
+    color: #fff;
+    border: 2px solid #2d2a4a;
+    border-radius: 4px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    transition: background-color 0.2s ease;
+}
+
+.btn-confirm-stage:hover {
+    background-color: #4a4578;
+    border-color: #4a4578;
 }

@@ -1,41 +1,38 @@
 <div id="event-page" class="event-page">
     <h2 class="event-title">{{ event.name }}</h2>
     {% include "event_status_controls.html" %}
-    <div class="event-tabs">
-        <button id="tab-setup"
-            class="event-tab{{ ' active' if event.status == 'registration' }}"
-            {% if event.status == "registration" %}
-                hx-get="/api/events/{{ event.id }}/setup?version={{ event.version }}"
-                hx-trigger="load, click"
-                hx-target="#event-section-content"
-                hx-swap="innerHTML"
-                _="on click add .active to me then remove .active from #tab-players then remove .active from #tab-stages"
-            {% else %}
-                disabled
-            {% endif %}
-            >
-            Setup
-        </button>
-        <button id="tab-players"
-            class="event-tab{{ ' active' if event.status != 'registration' }}"
-            hx-get="/api/events/{{ event.id }}/players"
-            {% if event.status != "registration" %}
-                hx-trigger="load, click"
-            {% endif %}
-            hx-target="#event-section-content"
-            hx-swap="innerHTML"
-            _="on click add .active to me then remove .active from #tab-setup then remove .active from #tab-stages">
-            Giocatori
-        </button>
-        <button id="tab-stages"
-            class="event-tab"
-            hx-get="/api/events/{{ event.id }}/stage/1"
-            hx-target="#event-section-content"
-            hx-swap="innerHTML"
-            _="on click add .active to me then remove .active from #tab-setup then remove .active from #tab-players">
-            Fasi
-        </button>
+
+    <div id="event-section-content" class="event-layout">
+        {% if event.status == "registration" %}
+            <div hx-get="/api/events/{{ event.id }}/setup?version={{ event.version }}"
+                 hx-trigger="load"
+                 hx-swap="innerHTML"></div>
+            <div hx-get="/api/events/{{ event.id }}/players"
+                 hx-trigger="load"
+                 hx-swap="innerHTML"></div>
+        {% else %}
+            <div id="stage-content"
+                 hx-get="/api/events/{{ event.id }}/stage/1"
+                 hx-trigger="load"
+                 hx-swap="outerHTML transition:true"></div>
+        {% endif %}
     </div>
 
-    <div id="event-section-content" class="event-layout"></div>
+    <div class="event-page-action">
+        {% if event.status == "registration" %}
+            <button class="event-phase-btn phase-btn-start"
+                hx-post="/api/events/{{ event.id }}/start"
+                hx-target="#event-page"
+                hx-swap="outerHTML">
+                Avvia evento
+            </button>
+        {% else %}
+            <button class="event-phase-btn phase-btn-back"
+                hx-post="/api/events/{{ event.id }}/back-to-registration"
+                hx-target="#event-page"
+                hx-swap="outerHTML">
+                ← Torna alla registrazione
+            </button>
+        {% endif %}
+    </div>
 </div>

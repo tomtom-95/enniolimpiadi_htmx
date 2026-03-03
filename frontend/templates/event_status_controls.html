@@ -2,18 +2,22 @@
     {% if oob %}
         hx-swap-oob="true"
     {% endif %}>
-    <div class="event-status-badge {{ event.status }}">{{ event.status }}</div>
-    {% if event.status == "registration" %}
-        <button hx-post="/api/events/{{ event.id }}/start"
-            hx-target="#event-page"
-            hx-swap="outerHTML">
-            Avvia evento
-        </button>
-    {% else %}
-        <button hx-post="/api/events/{{ event.id }}/back-to-registration"
-            hx-target="#event-page"
-            hx-swap="outerHTML">
-            Torna alla registrazione
-        </button>
-    {% endif %}
+    <div class="event-phase-bar">
+        <div class="event-phase-steps">
+            <div class="event-phase-step {% if event.status != 'registration' %}completed{% else %}active{% endif %}">
+                <div class="event-phase-dot">{% if event.status != 'registration' %}✓{% else %}1{% endif %}</div>
+                <span class="event-phase-label">Setup</span>
+            </div>
+            <div class="event-phase-conn {% if event.status != 'registration' %}done{% endif %}"></div>
+            <div class="event-phase-step {% if event.status == 'started' %}active{% elif event.status == 'finished' %}completed{% endif %}">
+                <div class="event-phase-dot">{% if event.status == 'finished' %}✓{% else %}2{% endif %}</div>
+                <span class="event-phase-label">In corso</span>
+            </div>
+            <div class="event-phase-conn {% if event.status == 'finished' %}done{% endif %}"></div>
+            <div class="event-phase-step {% if event.status == 'finished' %}active{% endif %}">
+                <div class="event-phase-dot">3</div>
+                <span class="event-phase-label">Concluso</span>
+            </div>
+        </div>
+    </div>
 </div>
