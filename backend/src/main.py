@@ -102,25 +102,25 @@ def _oob_badge_html(request, olympiad_id: int):
         return templates.get_template("olympiad_badge.html").render(olympiad=olympiad_badge_ctx, oob=True)
 
 
-def _oob_event_status_html(request, event_id: int):
-    conn = request.state.conn
-    event = conn.execute(
-        "SELECT current_stage_order FROM events WHERE id = ?",
-        (event_id,)
-    ).fetchone()
-    max_stage = conn.execute(
-        "SELECT MAX(stage_order) AS max_order FROM event_stages WHERE event_id = ?",
-        (event_id,)
-    ).fetchone()
-    max_stage_order = max_stage["max_order"] if max_stage else None
-
-    event_status = derive_event_status(event["current_stage_order"], max_stage_order)
-
-    event = {"id": event_id, "status": event_status}
-    html_content = templates.get_template("event_status_controls.html", oob=True)
-    html_content = html_content.render(event=event)
-
-    return html_content
+# def _oob_event_status_html(request, event_id: int):
+#     conn = request.state.conn
+#     event = conn.execute(
+#         "SELECT current_stage_order FROM events WHERE id = ?",
+#         (event_id,)
+#     ).fetchone()
+#     max_stage = conn.execute(
+#         "SELECT MAX(stage_order) AS max_order FROM event_stages WHERE event_id = ?",
+#         (event_id,)
+#     ).fetchone()
+#     max_stage_order = max_stage["max_order"] if max_stage else None
+# 
+#     event_status = derive_event_status(event["current_stage_order"], max_stage_order)
+# 
+#     event = {"id": event_id, "status": event_status}
+#     html_content = templates.get_template("event_status_controls.html", oob=True)
+#     html_content = html_content.render(event=event)
+# 
+#     return html_content
 
 
 def _render_operation_denied(result, olympiad_id, entities):
@@ -1793,6 +1793,7 @@ def get_event_setup(request: Request, event_id: int, version: int = Query(...)):
 
         html_content = templates.get_template("event_setup.html").render(
             event_id=event_id,
+            event_version=version,
             score_kinds=SCORE_KINDS,
             current_score_kind=current_score_kind,
             stage_kinds=stage_kinds,
@@ -1807,7 +1808,12 @@ def get_event_setup(request: Request, event_id: int, version: int = Query(...)):
 
 
 @app.post("/api/events/{event_id}/stages")
-def add_event_stage(request: Request, event_id: int, kind: str = Form(...)):
+def add_event_stage(
+    request: Request,
+    event_id: int,
+    event_version: int = Form(...),
+    kind: str = Form(...)
+):
     conn = request.state.conn
 
     olympiad_badge_ctx = get_olympiad_from_request(request)
@@ -1825,6 +1831,8 @@ def add_event_stage(request: Request, event_id: int, kind: str = Form(...)):
         result = Status.OLYMPIAD_RENAMED
     if result == Status.SUCCESS and not check_entity_exist(request, "events", event_id):
         result = Status.ENTITY_NOT_FOUND
+    if result == Status.SUCCESS and not check_event_version(request, event_id, event_version):
+        result = Status.EVENT_VERSION_OUTDATED
     if result == Status.SUCCESS and not check_user_authorized(request, olympiad_id):
         result = Status.NOT_AUTHORIZED
 
@@ -1849,6 +1857,8 @@ def add_event_stage(request: Request, event_id: int, kind: str = Form(...)):
                 events.generate_groups_stage(conn, stage_id, 1)
             elif kind == "single_elimination":
                 events.generate_single_elimination_stage(conn, stage_id)
+            
+        conn.execute("UPDATE events SET version = version + 1 WHERE id = ?", (event_id,))
 
         html_content = _render_stages_section_html(conn, event_id)
 
@@ -1925,24 +1935,27 @@ def remove_event_stage(request: Request, event_id: int, stage_id: int):
     return response
 
 
-def _render_stages_section_html(conn, event_id):
+def _render_stages_section_html(conn, event_id: int):
     """Re-render the stages setup section for the event page."""
-    stage_kinds = conn.execute(
-        "SELECT kind, label FROM stage_kinds ORDER BY kind"
-    ).fetchall()
+
+    event_version = conn.execute("SELECT version FROM events WHERE id = ?", (event_id,)).fetchone()["version"]
+    stage_kinds = conn.execute("SELECT kind, label FROM stage_kinds ORDER BY kind").fetchall()
 
     stages = conn.execute(
         """
         SELECT es.id, es.stage_order, es.kind, sk.label,
                COALESCE((SELECT COUNT(*) FROM groups g WHERE g.event_stage_id = es.id), 0) AS num_groups
-        FROM event_stages es JOIN stage_kinds sk ON sk.kind = es.kind
-        WHERE es.event_id = ? ORDER BY es.stage_order
+        FROM event_stages es
+        JOIN stage_kinds sk
+        ON sk.kind = es.kind
+        WHERE es.event_id = ?
+        ORDER BY es.stage_order
         """,
         (event_id,)
     ).fetchall()
 
     html_content = templates.get_template("event_stages_setup.html")
-    html_content = html_content.render(event_id=event_id, stage_kinds=stage_kinds, stages=stages)
+    html_content = html_content.render(event_id=event_id, event_version=event_version, stage_kinds=stage_kinds, stages=stages)
 
     return html_content
 

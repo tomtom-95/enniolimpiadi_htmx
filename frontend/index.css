@@ -846,6 +846,7 @@ body {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
+    overflow-anchor: none;
 }
 
 /*
@@ -853,10 +854,8 @@ body {
  */
 .event-players-container {
     display: flex;
-    flex-direction: column;
-    flex: 1;
-    min-height: 0;
-    gap: 0.75rem;
+    gap: 1rem;
+    width: 100%;
 }
 
 .event-player-list-section {
@@ -878,8 +877,6 @@ body {
 .enrolled-players-list, .available-players-list {
     display: flex;
     flex-direction: column;
-    flex: 1 1 0;
-    min-height: 0;
 }
 
 .event-player-item {
@@ -937,21 +934,11 @@ body {
     font-style: italic;
 }
 
-/*
- * Event players v2 — side-by-side columns
- */
-.event-players-container-v2 {
-    display: flex;
-    flex: 1;
-    min-height: 0;
-    gap: 1rem;
-}
 
 .players-column {
     display: flex;
     flex-direction: column;
-    flex: 1 1 0;
-    min-height: 0;
+    flex: 1;
     min-width: 0;
 }
 
@@ -961,7 +948,12 @@ body {
 
 #stages-setup-section {
     display: flex;
-    flex-grow: 1;
+    flex-direction: column;
+    width: 100%;
+}
+
+#stages-setup-section .stages-setup-details {
+    width: 100%;
 }
 
 #stage-content {
@@ -1458,16 +1450,13 @@ html.slide-back::view-transition-new(stage-slide) {
 }
 
 .btn-remove-stage {
-    flex-grow: 1;
-    align-items: center;
-    padding: 0;
-    font-size: 1rem;
+    padding: 0.3rem 0.6rem;
+    font-size: 0.85rem;
     font-weight: 700;
     color: #e85d4c;
     background-color: transparent;
     border: 2px solid #e85d4c;
     border-radius: 4px;
-    flex-shrink: 0;
     transition: background-color 0.2s ease, color 0.2s ease;
 }
 
@@ -1477,25 +1466,98 @@ html.slide-back::view-transition-new(stage-slide) {
 }
 
 /*
+ * Stages setup collapsible
+ */
+.stages-setup-details {
+    border: none;
+    interpolate-size: allow-keywords;
+}
+
+.stages-setup-details::details-content {
+    overflow: hidden;
+    height: 0;
+    transition: height 0.3s ease, content-visibility 0.3s ease allow-discrete;
+}
+
+.stages-setup-details[open]::details-content {
+    height: auto;
+}
+
+@starting-style {
+    .stages-setup-details[open]::details-content {
+        height: auto;
+    }
+}
+
+.stages-setup-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 0.25rem;
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+    border-bottom: 2px solid #2d2a4a;
+    margin-bottom: 1rem;
+}
+
+.stages-setup-summary::-webkit-details-marker {
+    display: none;
+}
+
+.stages-setup-summary::after {
+    content: '▲';
+    font-size: 0.65rem;
+    color: #9995a8;
+    transition: transform 0.2s ease;
+}
+
+.stages-setup-details:not([open]) .stages-setup-summary::after {
+    transform: rotate(180deg);
+}
+
+.stages-setup-summary-label {
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #2d2a4a;
+}
+
+.stages-setup-summary-count {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #9995a8;
+    margin-right: 0.5rem;
+}
+
+/*
  * Stage setup pipeline
  */
 .stage-setup-pipeline {
     display: flex;
     flex-direction: column;
-    flex-grow: 1;
+    align-items: stretch;
+    width: 100%;
 }
 
 .stage-setup-card {
     display: flex;
     flex-direction: column;
+    gap: 0.6rem;
+    width: 100%;
     background: #fff;
     border: 2px solid #2d2a4a;
-    align-items: center;
+    border-radius: 8px;
+    padding: 0.85rem 1rem;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.07);
+    box-sizing: border-box;
 }
 
 .stage-setup-card-header {
     display: flex;
     align-items: center;
+    justify-content: space-between;
 }
 
 .stage-setup-num {
@@ -1516,7 +1578,6 @@ html.slide-back::view-transition-new(stage-slide) {
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    margin-top: 0.6rem;
     padding-top: 0.6rem;
     border-top: 1px solid #e8e3da;
 }
@@ -1532,16 +1593,18 @@ html.slide-back::view-transition-new(stage-slide) {
 .stage-setup-arrow {
     text-align: center;
     color: #9995a8;
-    font-size: 1.1rem;
-    line-height: 1.6;
+    font-size: 1rem;
+    line-height: 1;
+    padding: 0.4rem 0;
     user-select: none;
 }
 
 .btn-add-stage {
     width: 100%;
+    margin-top: 0.75rem;
     padding: 0.6rem 1rem;
     border: 2px dashed #9995a8;
-    border-radius: 4px;
+    border-radius: 8px;
     background: transparent;
     color: #9995a8;
     font-size: 0.9rem;

@@ -1,7 +1,14 @@
-<div name="kind" class="stage-kind-select-inline">
-    <div id="stages-setup-section">
+<div id="stages-setup-section">
+    <details class="stages-setup-details" open>
+        <summary class="stages-setup-summary">
+            <span class="stages-setup-summary-label">Fasi del torneo</span>
+        </summary>
+
         <div class="stage-setup-pipeline">
             {% for stage in stages %}
+                {% if not loop.first %}
+                    <div class="stage-setup-arrow">&#8595;</div>
+                {% endif %}
                 <div class="stage-setup-card">
                     <div class="stage-setup-card-header">
                         <span class="stage-setup-num">Fase {{ stage.stage_order }}</span>
@@ -66,6 +73,7 @@
                     <form hx-post="/api/events/{{ event_id }}/stages"
                         hx-target="#stages-setup-section"
                         hx-swap="outerHTML">
+                        <input type="hidden" name="event_version" value="{{ event_version }}"> 
                         <div class="stage-kind-field">
                             <div class="stage-groups-setup-label">Tipo di fase</div>
                             <select name="kind" class="stage-kind-select-inline">
@@ -84,5 +92,5 @@
                 + Aggiungi fase
             </button>
         </div>
-    </div>
+    </details>
 </div>
