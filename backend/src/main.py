@@ -1875,7 +1875,12 @@ def add_event_stage(
 
 
 @app.delete("/api/events/{event_id}/stages/{stage_id}")
-def remove_event_stage(request: Request, event_id: int, stage_id: int):
+def remove_event_stage(
+    request: Request,
+    event_id: int,
+    stage_id: int,
+    event_version: int = Query(...)
+):
     conn = request.state.conn
 
     olympiad_badge_ctx = get_olympiad_from_request(request)
@@ -1893,6 +1898,8 @@ def remove_event_stage(request: Request, event_id: int, stage_id: int):
         result = Status.OLYMPIAD_RENAMED
     if result == Status.SUCCESS and not check_entity_exist(request, "events", event_id):
         result = Status.ENTITY_NOT_FOUND
+    if result == Status.SUCCESS and not check_event_version(request, event_id, event_version):
+        result = Status.EVENT_VERSION_OUTDATED
     if result == Status.SUCCESS and not check_user_authorized(request, olympiad_id):
         result = Status.NOT_AUTHORIZED
 
@@ -1920,6 +1927,8 @@ def remove_event_stage(request: Request, event_id: int, stage_id: int):
                     events.generate_groups_stage(conn, stage_id, len(groups))
                 elif stage_kind == "single_elimination":
                     events.generate_single_elimination_stage(conn, stage_id)
+
+        conn.execute("UPDATE events SET version = version + 1 WHERE id = ?", (event_id,))
 
         html_content = _render_stages_section_html(conn, event_id)
 

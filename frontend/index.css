@@ -228,6 +228,7 @@ body {
     background-color: #fff;
     border: 2px solid #2d2a4a;
     border-right: none;
+    border-radius: 8px 0 0 8px;
     outline: none;
     transition: border-color 0.2s ease;
 }
@@ -252,6 +253,7 @@ body {
     color: #fff;
     background-color: #e85d4c;
     border: 2px solid #e85d4c;
+    border-radius: 0 8px 8px 0;
     transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 
@@ -272,21 +274,23 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 0.4rem 0.5rem;
-    margin-bottom: 0.1rem;
+    padding: 0.65rem 0.75rem;
+    margin-bottom: 0.5rem;
     background-color: #fff;
-    border-left: 4px solid #e85d4c;
+    border: 2px solid #2d2a4a;
+    border-radius: 8px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.07);
     cursor: pointer;
     flex-shrink: 0;
     overflow: hidden;
-    transition: background-color 0.2s ease, border-left-color 0.2s ease,
+    transition: background-color 0.2s ease, border-color 0.2s ease,
                 max-height 200ms ease-out, opacity 200ms ease-out,
                 margin-bottom 200ms ease-out, padding 200ms ease-out;
 }
 
 .entity-element:hover {
     background-color: #f5f0e6;
-    border-left-color: #c94a3a;
+    border-color: #e85d4c;
 }
 
 .entity-element.removing {
@@ -603,7 +607,8 @@ body {
  */
 .entity-element.editing {
     padding: 0;
-    border-left: none;
+    border: none;
+    box-shadow: none;
 }
 
 .entity-element.editing .edit-form {
@@ -866,7 +871,9 @@ body {
 }
 
 .event-section-label {
-    margin: 0 0 0.4rem 0;
+    margin: 0 0 0.75rem 0;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid #e8e3da;
     font-size: 0.75rem;
     font-weight: 700;
     text-transform: uppercase;
@@ -885,7 +892,7 @@ body {
     align-items: center;
     padding: 0.5rem 0.75rem;
     margin-bottom: 0.35rem;
-    background-color: #fff;
+    background-color: #faf5eb;
     font-size: 0.9rem;
     flex-shrink: 0;
     transition: background-color 0.2s ease, border-left-color 0.2s ease;
@@ -1469,7 +1476,12 @@ html.slide-back::view-transition-new(stage-slide) {
  * Stages setup collapsible
  */
 .stages-setup-details {
-    border: none;
+    background: #fff;
+    border: 2px solid #2d2a4a;
+    border-radius: 8px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.07);
+    padding: 0.75rem 1rem;
+    box-sizing: border-box;
     interpolate-size: allow-keywords;
 }
 
@@ -1493,7 +1505,7 @@ html.slide-back::view-transition-new(stage-slide) {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0.5rem 0.25rem;
+    padding: 0.5rem 0;
     cursor: pointer;
     list-style: none;
     user-select: none;

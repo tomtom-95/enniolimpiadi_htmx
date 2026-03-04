@@ -51,6 +51,7 @@
                     {% endif %}
                     <button class="btn-remove-stage"
                         hx-delete="/api/events/{{ event_id }}/stages/{{ stage.id }}"
+                        hx-vals='{"event_version": {{ event_version }}}'
                         hx-target="#stages-setup-section"
                         hx-swap="outerHTML">
                         Rimuovi questa fase
@@ -58,37 +59,11 @@
                 </div>
             {% endfor %}
 
-            <div id="stage-draft-wrapper" style="display: none;">
-                {% if stages %}
-                    <div class="stage-setup-arrow">&#8595;</div>
-                {% endif %}
-                <div class="stage-setup-card">
-                    <div class="stage-setup-card-header">
-                        <span class="stage-setup-num">Fase {{ (stages | length) + 1 }}</span>
-                        <button type="button" class="btn-remove-stage"
-                            _="on click hide #stage-draft-wrapper then show #btn-add-stage">
-                            &#10005;
-                        </button>
-                    </div>
-                    <form hx-post="/api/events/{{ event_id }}/stages"
-                        hx-target="#stages-setup-section"
-                        hx-swap="outerHTML">
-                        <input type="hidden" name="event_version" value="{{ event_version }}"> 
-                        <div class="stage-kind-field">
-                            <div class="stage-groups-setup-label">Tipo di fase</div>
-                            <select name="kind" class="stage-kind-select-inline">
-                                {% for sk in stage_kinds %}
-                                    <option value="{{ sk.kind }}">{{ sk.label }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <button type="submit" class="btn-confirm-stage">Aggiungi fase</button>
-                    </form>
-                </div>
-            </div>
-
             <button id="btn-add-stage" class="btn-add-stage"
-                _="on click hide me then show #stage-draft-wrapper">
+                hx-post="/api/events/{{ event_id }}/stages"
+                hx-vals='{"kind": "{{ stage_kinds[0].kind }}", "event_version": "{{ event_version }}"}'
+                hx-target="#stages-setup-section"
+                hx-swap="outerHTML">
                 + Aggiungi fase
             </button>
         </div>
