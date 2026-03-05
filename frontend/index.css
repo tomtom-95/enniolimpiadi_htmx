@@ -1638,6 +1638,9 @@ html.slide-back::view-transition-new(stage-slide) {
 
 .stage-kind-select-inline {
     display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
     padding: 0.5rem 0.75rem;
     border: 2px solid #2d2a4a;
     border-radius: 4px;
@@ -1647,6 +1650,67 @@ html.slide-back::view-transition-new(stage-slide) {
     color: #2d2a4a;
     background-color: #fff;
     cursor: pointer;
+}
+
+.stage-kind-arrow {
+    font-size: 0.65rem;
+    margin-left: 0.5rem;
+    opacity: 0.6;
+}
+
+@keyframes stageKindPickerIn {
+    from { opacity: 0; transform: scaleY(0.8); }
+    to   { opacity: 1; transform: scaleY(1); }
+}
+
+@keyframes stageKindDisplayIn {
+    from { opacity: 0; transform: scaleY(0.9); }
+    to   { opacity: 1; transform: scaleY(1); }
+}
+
+.stage-kind-display {
+    animation: stageKindDisplayIn 0.12s ease;
+    transform-origin: top center;
+}
+
+.stage-kind-picker {
+    display: flex;
+    flex-direction: column;
+    border: 2px solid #2d2a4a;
+    border-radius: 4px;
+    overflow: hidden;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+    animation: stageKindPickerIn 0.15s ease;
+    transform-origin: top center;
+}
+
+.stage-kind-option {
+    padding: 0.5rem 0.75rem;
+    font-family: 'Space Grotesk', system-ui, sans-serif;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: #2d2a4a;
+    background-color: #fff;
+    border-left: 4px solid transparent;
+    cursor: pointer;
+    text-align: left;
+    transition: background-color 0.15s ease;
+}
+
+.stage-kind-option:hover {
+    background-color: #f5f0e6;
+    border-left-color: #e85d4c;
+}
+
+.stage-kind-option.active {
+    background-color: #2d2a4a;
+    color: #faf5eb;
+    border-left-color: #2d2a4a;
+}
+
+.stage-kind-option.active:hover {
+    background-color: #e85d4c;
+    border-left-color: #e85d4c;
 }
 
 .btn-confirm-stage {

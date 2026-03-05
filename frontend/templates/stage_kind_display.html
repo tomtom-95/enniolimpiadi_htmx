@@ -1,0 +1,10 @@
+<div id="stage-kind-{{ stage_id }}" class="stage-kind-display">
+    <button type="button"
+        class="stage-kind-select-inline"
+        hx-get="/api/events/{{ event_id }}/stages/{{ stage_id }}/kind/edit"
+        hx-target="#stage-kind-{{ stage_id }}"
+        hx-swap="outerHTML">
+        <span>{{ current_label }}</span>
+        <span class="stage-kind-arrow">&#9660;</span>
+    </button>
+</div>

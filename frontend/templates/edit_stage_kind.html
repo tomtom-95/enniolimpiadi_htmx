@@ -1,0 +1,18 @@
+<div id="stage-kind-{{ stage_id }}" class="stage-kind-picker"
+    hx-get="/api/events/{{ event_id }}/stages/{{ stage_id }}/kind/cancel-edit"
+    hx-target="#stage-kind-{{ stage_id }}"
+    hx-swap="outerHTML"
+    hx-trigger="closeStageKindEdit"
+    _="on click elsewhere or keyup[key=='Escape'] from window trigger closeStageKindEdit">
+    {% for sk in stage_kinds %}
+        <button type="button"
+            class="stage-kind-option {{ 'active' if sk.kind == current_kind }}"
+            hx-patch="/api/events/{{ event_id }}/stages/{{ stage_id }}"
+            hx-vals='{"kind": "{{ sk.kind }}"}'
+            hx-target="#stages-setup-section"
+            hx-swap="outerHTML"
+            _="on click trigger closeStageKindEdit on closest div">
+            {{ sk.label }}
+        </button>
+    {% endfor %}
+</div>

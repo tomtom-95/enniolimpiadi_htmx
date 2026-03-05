@@ -1205,7 +1205,11 @@ def delete_events(request: Request, entity_id: int, entity_name: str = Query(...
 # ---------------------------------------------------------------------------
 
 @app.get("/api/events/{event_id}")
-def select_event(request: Request, event_id: int, event_name: str = Query(..., alias="name")):
+def select_event(
+    request: Request,
+    event_id: int,
+    event_name: str = Query(..., alias="name")
+):
     conn = request.state.conn
 
     olympiad_badge_ctx = get_olympiad_from_request(request)
@@ -1253,7 +1257,58 @@ def select_event(request: Request, event_id: int, event_name: str = Query(..., a
             "version": event["version"],
             "status": event_status
         }
-        html_content = render_fragment("event_page", event=event_data)
+
+        extra_ctx = {}
+        if event_status == "registration":
+            current_score_kind = event["score_kind"]
+            stage_kinds = conn.execute(
+                "SELECT kind, label FROM stage_kinds ORDER BY kind"
+            ).fetchall()
+            stages = conn.execute(
+                "SELECT es.id, es.stage_order, es.kind, sk.label, "
+                "COALESCE((SELECT COUNT(*) FROM groups g WHERE g.event_stage_id = es.id), 0) AS num_groups "
+                "FROM event_stages es JOIN stage_kinds sk ON sk.kind = es.kind "
+                "WHERE es.event_id = ? ORDER BY es.stage_order",
+                (event_id,)
+            ).fetchall()
+
+            enrolled_participants = conn.execute(
+                """
+                SELECT ep.participant_id AS id, COALESCE(pl.name, t.name) AS name
+                FROM event_participants ep
+                JOIN participants p ON p.id = ep.participant_id
+                LEFT JOIN players pl ON pl.id = p.player_id
+                LEFT JOIN teams t ON t.id = p.team_id
+                WHERE ep.event_id = ?
+                ORDER BY name
+                """,
+                (event_id,)
+            ).fetchall()
+            enrolled_ids = {p["id"] for p in enrolled_participants}
+
+            all_participants = conn.execute(
+                """
+                SELECT p.id, COALESCE(pl.name, t.name) AS name
+                FROM participants p
+                LEFT JOIN players pl ON pl.id = p.player_id
+                LEFT JOIN teams t ON t.id = p.team_id
+                WHERE COALESCE(pl.olympiad_id, t.olympiad_id) = ?
+                ORDER BY name
+                """,
+                (olympiad_id,)
+            ).fetchall()
+            available_participants = [p for p in all_participants if p["id"] not in enrolled_ids]
+
+            extra_ctx = dict(
+                score_kinds=SCORE_KINDS,
+                current_score_kind=current_score_kind,
+                stage_kinds=stage_kinds,
+                stages=stages,
+                enrolled_participants=enrolled_participants,
+                available_participants=available_participants,
+            )
+
+        html_content = render_fragment("event_page", event=event_data, **extra_ctx)
 
     html_content += _oob_badge_html(request, olympiad_id)
     response = HTMLResponse(html_content)
@@ -1286,7 +1341,7 @@ def _set_event_stage_order(request: Request, event_id: int, new_stage_order: int
     html_content, extra_headers = _render_operation_denied(result, olympiad_id, "events")
 
     if result == Status.ENTITY_NOT_FOUND:
-        html_content = templates.get_template("entity_deleted_oob.html").render()
+        html_content = templates.get_template("event_not_found.html").render()
     elif result == Status.SUCCESS:
         conn.execute(
             "UPDATE events SET current_stage_order = ? WHERE id = ?",
@@ -1524,6 +1579,36 @@ def resize_stage_groups(
         conn.rollback()
 
     return response
+
+
+@app.get("/api/events/{event_id}/stages/{stage_id}/kind/edit")
+def get_edit_stage_kind(request: Request, event_id: int, stage_id: int):
+    conn = request.state.conn
+    row = conn.execute(
+        "SELECT es.kind, sk.label FROM event_stages es JOIN stage_kinds sk ON sk.kind = es.kind WHERE es.id = ? AND es.event_id = ?",
+        (stage_id, event_id)
+    ).fetchone()
+    stage_kinds = conn.execute("SELECT kind, label FROM stage_kinds ORDER BY kind").fetchall()
+    return templates.TemplateResponse(request, "edit_stage_kind.html", {
+        "stage_id": stage_id,
+        "event_id": event_id,
+        "current_kind": row["kind"],
+        "stage_kinds": stage_kinds,
+    })
+
+
+@app.get("/api/events/{event_id}/stages/{stage_id}/kind/cancel-edit")
+def cancel_edit_stage_kind(request: Request, event_id: int, stage_id: int):
+    conn = request.state.conn
+    row = conn.execute(
+        "SELECT es.kind, sk.label FROM event_stages es JOIN stage_kinds sk ON sk.kind = es.kind WHERE es.id = ? AND es.event_id = ?",
+        (stage_id, event_id)
+    ).fetchone()
+    return templates.TemplateResponse(request, "stage_kind_display.html", {
+        "stage_id": stage_id,
+        "event_id": event_id,
+        "current_label": row["label"],
+    })
 
 
 @app.patch("/api/events/{event_id}/stages/{stage_id}")
@@ -2110,7 +2195,9 @@ def unenroll_participant(request: Request, event_id: int, participant_id: int):
             stage_id   = first_stage["id"]
             stage_kind = first_stage["kind"]
             if stage_kind == "groups":
-                groups = conn.execute("SELECT id FROM groups WHERE event_stage_id = ?", (stage_id,)).fetchall()
+                groups = conn.execute(
+                    "SELECT id FROM groups WHERE event_stage_id = ?", (stage_id,)
+                ).fetchall()
                 events.generate_groups_stage(conn, stage_id, len(groups))
             elif stage_kind == "single_elimination":
                 events.generate_single_elimination_stage(conn, stage_id)

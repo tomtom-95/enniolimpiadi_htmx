@@ -30,12 +30,154 @@
 
     <div id="event-section-content" class="event-layout">
         {% if event.status == "registration" %}
-            <div hx-get="/api/events/{{ event.id }}/setup?version={{ event.version }}"
-                 hx-trigger="load"
-                 hx-swap="innerHTML"></div>
-            <div hx-get="/api/events/{{ event.id }}/players"
-                 hx-trigger="load"
-                 hx-swap="innerHTML"></div>
+            {% block event_setup %}
+            <div class="form-section">
+                <details class="stages-setup-details" open>
+                    <summary class="stages-setup-summary">
+                        <span class="stages-setup-summary-label">Tipo di punteggio</span>
+                    </summary>
+                    {% block score_kind_section %}
+                    <div id="score-kind-section">
+                        <input type="hidden" name="event_version" value="{{ event.version }}">
+                        {% for sk in score_kinds %}
+                            {% set active = "active" if sk.kind == current_score_kind else "" %}
+                            <button type="button" class="score-kind-item {{ active }}"
+                                name="score_kind" value="{{ sk.kind }}"
+                                hx-put="/api/events/{{ event.id }}/score_kind"
+                                hx-target="#score-kind-section"
+                                hx-swap="outerHTML"
+                                hx-include="[name='event_version']">
+                                {{ sk.label }}
+                            </button>
+                        {% endfor %}
+                    </div>
+                    {% endblock %}
+                </details>
+            </div>
+
+            <div class="form-section">
+                {% block stages_setup_section %}
+                <div id="stages-setup-section">
+                    <details class="stages-setup-details" open>
+                        <summary class="stages-setup-summary">
+                            <span class="stages-setup-summary-label">Fasi del torneo</span>
+                        </summary>
+
+                        <div class="stage-setup-pipeline">
+                            {% for stage in stages %}
+                                {% if not loop.first %}
+                                    <div class="stage-setup-arrow">&#8595;</div>
+                                {% endif %}
+                                <div class="stage-setup-card">
+                                    <div class="stage-setup-card-header">
+                                        <span class="stage-setup-num">Fase {{ stage.stage_order }}</span>
+                                    </div>
+                                    <div id="stage-kind-{{ stage.id }}" class="stage-kind-display">
+                                        <button type="button"
+                                            class="stage-kind-select-inline"
+                                            hx-get="/api/events/{{ event.id }}/stages/{{ stage.id }}/kind/edit"
+                                            hx-target="#stage-kind-{{ stage.id }}"
+                                            hx-swap="outerHTML">
+                                            <span>{{ stage.label }}</span>
+                                            <span class="stage-kind-arrow">&#9660;</span>
+                                        </button>
+                                    </div>
+                                    {% if stage.kind == 'groups' %}
+                                        <div class="stage-groups-setup">
+                                            <span class="stage-groups-setup-label">Gironi</span>
+                                            <div class="group-resize-controls">
+                                                {% if stage.num_groups > 1 %}
+                                                    <button class="group-resize-btn"
+                                                        hx-post="/api/events/{{ event.id }}/stages/{{ stage.id }}/num-groups"
+                                                        hx-vals='{"num_groups": {{ stage.num_groups - 1 }}}'
+                                                        hx-target="#stages-setup-section"
+                                                        hx-swap="outerHTML">
+                                                        &minus;
+                                                    </button>
+                                                {% else %}
+                                                    <button class="group-resize-btn" disabled>&minus;</button>
+                                                {% endif %}
+                                                <span class="group-resize-value">{{ stage.num_groups }}</span>
+                                                <button class="group-resize-btn"
+                                                    hx-post="/api/events/{{ event.id }}/stages/{{ stage.id }}/num-groups"
+                                                    hx-vals='{"num_groups": {{ stage.num_groups + 1 }}}'
+                                                    hx-target="#stages-setup-section"
+                                                    hx-swap="outerHTML">
+                                                    &plus;
+                                                </button>
+                                            </div>
+                                        </div>
+                                    {% endif %}
+                                    <button class="btn-remove-stage"
+                                        hx-delete="/api/events/{{ event.id }}/stages/{{ stage.id }}"
+                                        hx-vals='{"event_version": {{ event.version }}}'
+                                        hx-target="#stages-setup-section"
+                                        hx-swap="outerHTML">
+                                        Rimuovi questa fase
+                                    </button>
+                                </div>
+                            {% endfor %}
+
+                            <button id="btn-add-stage" class="btn-add-stage"
+                                hx-post="/api/events/{{ event.id }}/stages"
+                                hx-vals='{"kind": "{{ stage_kinds[0].kind }}", "event_version": "{{ event.version }}"}'
+                                hx-target="#stages-setup-section"
+                                hx-swap="outerHTML">
+                                + Aggiungi fase
+                            </button>
+                        </div>
+                    </details>
+                </div>
+                {% endblock %}
+            </div>
+            {% endblock %}
+
+            {% block event_player_container %}
+            <div id="event-player-container">
+                <details class="stages-setup-details" open>
+                    <summary class="stages-setup-summary">
+                        <span class="stages-setup-summary-label">Giocatori</span>
+                    </summary>
+
+                    <div class="event-players-container">
+                        <div class="players-column available-column">
+                            <h4 class="event-section-label">Disponibili</h4>
+                            {% if not available_participants %}
+                                <div class="no-players-msg">Nessun giocatore disponibile</div>
+                            {% else %}
+                                <div class="available-players-list">
+                                    {% for participant in available_participants %}
+                                        <div class="event-player-item available">
+                                            <span>{{ participant.name }}</span>
+                                            <button class="btn-enroll" title="Iscrivi" hx-post="/api/events/{{ event.id }}/enroll/{{ participant.id }}"
+                                                hx-target="#event-player-container" hx-trigger="click" hx-swap="outerHTML">
+                                                +
+                                            </button>
+                                        </div>
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                        </div>
+                        <div class="players-column enrolled-column">
+                            <h4 class="event-section-label">Iscritti</h4>
+                            {% if not enrolled_participants %}
+                                <div class="no-players-msg">Nessun giocatore iscritto</div>
+                            {% else %}
+                                <div class="enrolled-players-list">
+                                    {% for participant in enrolled_participants %}
+                                        <div id="enrolled-participant-{{ participant.id }}" class="event-player-item enrolled">
+                                            <span>{{ participant.name }}</span>
+                                            <button class="item-delete" aria-label="Rimuovi" hx-delete="/api/events/{{ event.id }}/enroll/{{ participant.id }}"
+                                                hx-target="#event-player-container" hx-trigger="click" hx-swap="outerHTML"></button>
+                                        </div>
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </details>
+            </div>
+            {% endblock %}
         {% else %}
             <div id="stage-content"
                  hx-get="/api/events/{{ event.id }}/stage/1"
@@ -47,11 +189,9 @@
     <div class="event-page-action">
         {% if event.status == "registration" %}
             <button class="event-phase-btn phase-btn-start"
-                hx-post="/api/events/{{ event.id }}/start"
-                hx-target="#event-page"
-                hx-swap="outerHTML">
-                Avvia evento
-            </button>
+                    hx-post="/api/events/{{ event.id }}/start"
+                    hx-target="#event-page"
+                    hx-swap="outerHTML">Avvia evento</button>
         {% else %}
             <button class="event-phase-btn phase-btn-back"
                 hx-post="/api/events/{{ event.id }}/back-to-registration"
@@ -61,157 +201,6 @@
             </button>
         {% endif %}
     </div>
-</div>
-{% endblock %}
-
-
-{% block event_setup %}
-<div class="form-section">
-    <details class="stages-setup-details" open>
-        <summary class="stages-setup-summary">
-            <span class="stages-setup-summary-label">Tipo di punteggio</span>
-        </summary>
-        {% block score_kind_section %}
-        <div id="score-kind-section">
-            <input type="hidden" name="event_version" value="{{ event.version }}">
-            {% for sk in score_kinds %}
-                {% set active = "active" if sk.kind == current_score_kind else "" %}
-                <button type="button" class="score-kind-item {{ active }}"
-                    name="score_kind" value="{{ sk.kind }}"
-                    hx-put="/api/events/{{ event.id }}/score_kind"
-                    hx-target="#score-kind-section"
-                    hx-swap="outerHTML"
-                    hx-include="[name='event_version']">
-                    {{ sk.label }}
-                </button>
-            {% endfor %}
-        </div>
-        {% endblock %}
-    </details>
-</div>
-
-<div class="form-section">
-    {% block stages_setup_section %}
-    <div id="stages-setup-section">
-        <details class="stages-setup-details" open>
-            <summary class="stages-setup-summary">
-                <span class="stages-setup-summary-label">Fasi del torneo</span>
-            </summary>
-
-            <div class="stage-setup-pipeline">
-                {% for stage in stages %}
-                    {% if not loop.first %}
-                        <div class="stage-setup-arrow">&#8595;</div>
-                    {% endif %}
-                    <div class="stage-setup-card">
-                        <div class="stage-setup-card-header">
-                            <span class="stage-setup-num">Fase {{ stage.stage_order }}</span>
-                        </div>
-                        <select name="kind"
-                            class="stage-kind-select-inline"
-                            hx-patch="/api/events/{{ event.id }}/stages/{{ stage.id }}"
-                            hx-trigger="change"
-                            hx-target="#stages-setup-section"
-                            hx-swap="outerHTML">
-                            {% for sk in stage_kinds %}
-                                <option value="{{ sk.kind }}" {{ 'selected' if sk.kind == stage.kind }}>{{ sk.label }}</option>
-                            {% endfor %}
-                        </select>
-                        {% if stage.kind == 'groups' %}
-                            <div class="stage-groups-setup">
-                                <span class="stage-groups-setup-label">Gironi</span>
-                                <div class="group-resize-controls">
-                                    {% if stage.num_groups > 1 %}
-                                        <button class="group-resize-btn"
-                                            hx-post="/api/events/{{ event.id }}/stages/{{ stage.id }}/num-groups"
-                                            hx-vals='{"num_groups": {{ stage.num_groups - 1 }}}'
-                                            hx-target="#stages-setup-section"
-                                            hx-swap="outerHTML">
-                                            &minus;
-                                        </button>
-                                    {% else %}
-                                        <button class="group-resize-btn" disabled>&minus;</button>
-                                    {% endif %}
-                                    <span class="group-resize-value">{{ stage.num_groups }}</span>
-                                    <button class="group-resize-btn"
-                                        hx-post="/api/events/{{ event.id }}/stages/{{ stage.id }}/num-groups"
-                                        hx-vals='{"num_groups": {{ stage.num_groups + 1 }}}'
-                                        hx-target="#stages-setup-section"
-                                        hx-swap="outerHTML">
-                                        &plus;
-                                    </button>
-                                </div>
-                            </div>
-                        {% endif %}
-                        <button class="btn-remove-stage"
-                            hx-delete="/api/events/{{ event.id }}/stages/{{ stage.id }}"
-                            hx-vals='{"event_version": {{ event.version }}}'
-                            hx-target="#stages-setup-section"
-                            hx-swap="outerHTML">
-                            Rimuovi questa fase
-                        </button>
-                    </div>
-                {% endfor %}
-
-                <button id="btn-add-stage" class="btn-add-stage"
-                    hx-post="/api/events/{{ event.id }}/stages"
-                    hx-vals='{"kind": "{{ stage_kinds[0].kind }}", "event_version": "{{ event.version }}"}'
-                    hx-target="#stages-setup-section"
-                    hx-swap="outerHTML">
-                    + Aggiungi fase
-                </button>
-            </div>
-        </details>
-    </div>
-    {% endblock %}
-</div>
-{% endblock %}
-
-
-{% block event_player_container %}
-<div id="event-player-container">
-    <details class="stages-setup-details" open>
-        <summary class="stages-setup-summary">
-            <span class="stages-setup-summary-label">Giocatori</span>
-        </summary>
-
-        <div class="event-players-container">
-            <div class="players-column available-column">
-                <h4 class="event-section-label">Disponibili</h4>
-                {% if not available_participants %}
-                    <div class="no-players-msg">Nessun giocatore disponibile</div>
-                {% else %}
-                    <div class="available-players-list">
-                        {% for participant in available_participants %}
-                            <div class="event-player-item available">
-                                <span>{{ participant.name }}</span>
-                                <button class="btn-enroll" title="Iscrivi" hx-post="/api/events/{{ event.id }}/enroll/{{ participant.id }}"
-                                    hx-target="#event-player-container" hx-trigger="click" hx-swap="outerHTML">
-                                    +
-                                </button>
-                            </div>
-                        {% endfor %}
-                    </div>
-                {% endif %}
-            </div>
-            <div class="players-column enrolled-column">
-                <h4 class="event-section-label">Iscritti</h4>
-                {% if not enrolled_participants %}
-                    <div class="no-players-msg">Nessun giocatore iscritto</div>
-                {% else %}
-                    <div class="enrolled-players-list">
-                        {% for participant in enrolled_participants %}
-                            <div id="enrolled-participant-{{ participant.id }}" class="event-player-item enrolled">
-                                <span>{{ participant.name }}</span>
-                                <button class="item-delete" aria-label="Rimuovi" hx-delete="/api/events/{{ event.id }}/enroll/{{ participant.id }}"
-                                    hx-target="#event-player-container" hx-trigger="click" hx-swap="outerHTML"></button>
-                            </div>
-                        {% endfor %}
-                    </div>
-                {% endif %}
-            </div>
-        </div>
-    </details>
 </div>
 {% endblock %}
 
