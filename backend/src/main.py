@@ -12,6 +12,7 @@ import uvicorn
 from fastapi import FastAPI, Request, Form, Query
 from fastapi.responses import JSONResponse, HTMLResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
+from jinja2_fragments import render_block as _jinja2_render_block
 from pathlib import Path
 
 from . import database
@@ -40,6 +41,9 @@ schema_path = Path(os.environ["SCHEMA_PATH"])
 
 root = Path(os.environ["PROJECT_ROOT"])
 templates = Jinja2Templates(directory=root / "frontend" / "templates")
+
+def render_fragment(block_name: str, **ctx) -> str:
+    return _jinja2_render_block(templates.env, "event_page.html", block_name, **ctx)
 
 SCORE_KINDS = [
     {"kind": "points", "label": "Punti"},
@@ -700,13 +704,13 @@ async def update_match_score(
 
         if stage_kind == "single_elimination":
             stage = events.present_single_elimination_stage(conn, stage_id)
-            html_content = templates.get_template("stage_single_elimination_inner.html")
-            html_content = html_content.render(stage=stage, event_id=event_id)
+            html_content = render_fragment("stage_bracket_inner",
+                stage=stage, event={"id": event_id, "version": new_event_version})
             extra_headers["HX-Retarget"] = "#stage-bracket-inner"
         else:
             stage = events.present_groups_stage(conn, stage_id)
-            html_content = templates.get_template("stage_groups_inner.html")
-            html_content = html_content.render(stage=stage, event_id=event_id, event_version=new_event_version)
+            html_content = render_fragment("stage_groups_inner",
+                stage=stage, event={"id": event_id, "version": new_event_version})
             extra_headers["HX-Retarget"] = "#stage-groups-inner"
 
         extra_headers["HX-Reswap"] = "outerHTML"
@@ -724,14 +728,9 @@ async def update_match_score(
 def get_bracket_content(request: Request, event_id: int, stage_id: int):
     conn = request.state.conn
     stage = events.present_single_elimination_stage(conn, stage_id)
-    return templates.TemplateResponse(
-        request,
-        "stage_single_elimination_inner.html",
-        {
-            "stage": stage,
-            "event_id": event_id,
-        }
-    )
+    event_version = conn.execute("SELECT version FROM events WHERE id = ?", (event_id,)).fetchone()["version"]
+    return HTMLResponse(render_fragment("stage_bracket_inner",
+        stage=stage, event={"id": event_id, "version": event_version}))
 
 
 def _cancel_edit(request: Request, entities: str, item_id: int, name: str):
@@ -1056,8 +1055,7 @@ def create_event(request: Request, name: str = Form(...)):
             (name, olympiad_id)
         ).fetchone()
         event_data = {"id": event["id"], "name": event["name"], "version": event["version"], "status": "registration"}
-        html_content = templates.get_template("event_page.html")
-        html_content = html_content.render(event=event_data)
+        html_content = render_fragment("event_page", event=event_data)
 
     html_content += _oob_badge_html(request, olympiad_id)
     response = HTMLResponse(html_content)
@@ -1249,9 +1247,13 @@ def select_event(request: Request, event_id: int, event_name: str = Query(..., a
             (event_id,)
         ).fetchone()
         event_status = derive_event_status(event["current_stage_order"], max_stage_order)
-        event_data = { "id": event["id"], "name": event["name"], "version": event["version"], "status": event_status }
-        html_content = templates.get_template("event_page.html")
-        html_content = html_content.render(event=event_data)
+        event_data = {
+            "id": event["id"],
+            "name": event["name"],
+            "version": event["version"],
+            "status": event_status
+        }
+        html_content = render_fragment("event_page", event=event_data)
 
     html_content += _oob_badge_html(request, olympiad_id)
     response = HTMLResponse(html_content)
@@ -1303,7 +1305,7 @@ def _set_event_stage_order(request: Request, event_id: int, new_stage_order: int
         ).fetchone()
         event_status = derive_event_status(new_stage_order, max_stage_order)
         event_data = {"id": event["id"], "name": event["name"], "version": event["version"], "status": event_status}
-        html_content = templates.get_template("event_page.html").render(event=event_data)
+        html_content = render_fragment("event_page", event=event_data)
 
     html_content += _oob_badge_html(request, olympiad_id)
     response = HTMLResponse(html_content)
@@ -1378,8 +1380,10 @@ def get_event_players(request: Request, event_id: int):
             (olympiad_id,)
         ).fetchall()
         available_participants = [ p for p in all_participants if p["id"] not in enrolled_ids ]
-        html_content = templates.get_template("event_players_section.html")
-        html_content = html_content.render(event_id=event_id, enrolled_participants=enrolled_participants, available_participants=available_participants)
+        html_content = render_fragment("event_player_container",
+            event={"id": event_id},
+            enrolled_participants=enrolled_participants,
+            available_participants=available_participants)
 
     html_content += _oob_badge_html(request, olympiad_id)
     response = HTMLResponse(html_content)
@@ -1445,14 +1449,12 @@ def get_event_stage(request: Request, event_id: int, stage_order: int):
 
             if stage_kind != "round_robin":
                 stage["name"] = stage_label
-                html_content = templates.get_template("event_stage.html").render(
+                html_content = render_fragment("stage_content",
                     stage=stage,
                     stage_kind=stage_kind,
                     stage_order=stage_order,
                     total_stages=total_stages,
-                    event_id=event_id,
-                    stage_id=stage_id,
-                    event_version=row["event_version"],
+                    event={"id": event_id, "version": row["event_version"]},
                 )
 
     html_content += _oob_badge_html(request, olympiad_id)
@@ -1509,8 +1511,8 @@ def resize_stage_groups(
             (event_id,)
         ).fetchone()["version"]
         stage = events.present_groups_stage(conn, stage_id)
-        html_content = templates.get_template("stage_groups.html")
-        html_content = html_content.render(stage=stage, event_id=event_id, event_version=new_version)
+        html_content = render_fragment("stage_groups_content",
+            stage=stage, event={"id": event_id, "version": new_version})
 
     html_content += _oob_badge_html(request, olympiad_id)
     response = HTMLResponse(html_content)
@@ -1652,15 +1654,8 @@ def get_stage_groups_content(request: Request, event_id: int, stage_id: int):
     event_version = conn.execute(
         "SELECT version FROM events WHERE id = ?", (event_id,)
     ).fetchone()["version"]
-    return templates.TemplateResponse(
-        request,
-        "stage_groups_inner.html",
-        {
-            "stage": stage,
-            "event_id": event_id,
-            "event_version": event_version,
-        }
-    )
+    return HTMLResponse(render_fragment("stage_groups_inner",
+        stage=stage, event={"id": event_id, "version": event_version}))
 
 
 # ---------------------------------------------------------------------------
@@ -1695,7 +1690,12 @@ async def stage_sse(request: Request, event_id: int, stage_id: int):
 # ---------------------------------------------------------------------------
 
 @app.put("/api/events/{event_id}/score_kind")
-def update_event_score_kind(request: Request, event_id: int, score_kind: str = Form(...)):
+def update_event_score_kind(
+    request: Request,
+    event_id: int,
+    event_version: int = Form(...),
+    score_kind: str = Form(...)
+):
     conn = request.state.conn
 
     olympiad_badge_ctx = get_olympiad_from_request(request)
@@ -1713,29 +1713,29 @@ def update_event_score_kind(request: Request, event_id: int, score_kind: str = F
         result = Status.OLYMPIAD_RENAMED
     if result == Status.SUCCESS and not check_entity_exist(request, "events", event_id):
         result = Status.ENTITY_NOT_FOUND
+    if result == Status.SUCCESS and not check_event_in_registration(request, event_id):
+        result = Status.EVENT_NOT_IN_REGISTRATION
+    if result == Status.SUCCESS and not check_event_version(request, event_id, event_version):
+        result = Status.EVENT_VERSION_OUTDATED
     if result == Status.SUCCESS and not check_user_authorized(request, olympiad_id):
         result = Status.NOT_AUTHORIZED
     
-    # here I am just looking at the score_kind that I want to use.
-    # This endpoint have no idea if people have changed the score kind
-    # An admin might have changed the tournament state into the running phase
-    # To realize this, this endpoint have to check the status of the event with event_id
-    # in the db, render the usual error modal if we are not in the setup phase and
-    # rerender the event_page.html for this event entirely
-
-    # please stop think about sse or I will never finish this fucking application
-    # What I want to do in this case is: check if we are in the setup phase
-    #   - if yes: update score kind (do not care about previous score kind, just set score kind to whatever here is defined)
-    #   - if no: modal that reload the event_page.html
-
     html_content, extra_headers = _render_operation_denied(result, olympiad_id, "events")
 
     if result == Status.ENTITY_NOT_FOUND:
         html_content = templates.get_template("entity_deleted_oob.html").render()
     elif result == Status.SUCCESS:
         conn.execute("UPDATE events SET score_kind = ? WHERE id = ?", (score_kind, event_id))
-        html_content = templates.get_template("score_kind.html").render(
-            event_id=event_id, score_kinds=SCORE_KINDS, current_score_kind=score_kind,
+        # ctx = {
+        #     "event_id": event_id,
+        #     "score_kind": SCORE_KINDS,
+        #     "current_score_kind": score_kind,
+        #     "event_version": event_version
+        # }
+        html_content = render_fragment("score_kind_section",
+            event={"id": event_id, "version": event_version},
+            score_kinds=SCORE_KINDS,
+            current_score_kind=score_kind,
         )
         extra_headers["HX-Retarget"] = "#score-kind-section"
         extra_headers["HX-Reswap"] = "outerHTML"
@@ -1791,9 +1791,8 @@ def get_event_setup(request: Request, event_id: int, version: int = Query(...)):
             (event_id,)
         ).fetchall()
 
-        html_content = templates.get_template("event_setup.html").render(
-            event_id=event_id,
-            event_version=version,
+        html_content = render_fragment("event_setup",
+            event={"id": event_id, "version": version},
             score_kinds=SCORE_KINDS,
             current_score_kind=current_score_kind,
             stage_kinds=stage_kinds,
@@ -1963,10 +1962,8 @@ def _render_stages_section_html(conn, event_id: int):
         (event_id,)
     ).fetchall()
 
-    html_content = templates.get_template("event_stages_setup.html")
-    html_content = html_content.render(event_id=event_id, event_version=event_version, stage_kinds=stage_kinds, stages=stages)
-
-    return html_content
+    return render_fragment("stages_setup_section",
+        event={"id": event_id, "version": event_version}, stage_kinds=stage_kinds, stages=stages)
 
 
 def _render_event_players_section_html(conn, event_id, olympiad_id):
@@ -1997,8 +1994,8 @@ def _render_event_players_section_html(conn, event_id, olympiad_id):
     ).fetchall()
     available_participants = [p for p in all_participants if p["id"] not in enrolled_ids]
 
-    return templates.get_template("event_players_section.html").render(
-        event_id=event_id,
+    return render_fragment("event_player_container",
+        event={"id": event_id},
         enrolled_participants=enrolled_participants,
         available_participants=available_participants,
     )

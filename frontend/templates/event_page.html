@@ -1,6 +1,32 @@
+{% block event_page %}
 <div id="event-page" class="event-page">
     <h2 class="event-title">{{ event.name }}</h2>
-    {% include "event_status_controls.html" %}
+
+    {% block event_status_controls %}
+    <div id="event-status-controls"
+        {% if oob %}
+            hx-swap-oob="true"
+        {% endif %}>
+        <div class="event-phase-bar">
+            <div class="event-phase-steps">
+                <div class="event-phase-step {% if event.status != 'registration' %}completed{% else %}active{% endif %}">
+                    <div class="event-phase-dot">{% if event.status != 'registration' %}✓{% else %}1{% endif %}</div>
+                    <span class="event-phase-label">Setup</span>
+                </div>
+                <div class="event-phase-conn {% if event.status != 'registration' %}done{% endif %}"></div>
+                <div class="event-phase-step {% if event.status == 'started' %}active{% elif event.status == 'finished' %}completed{% endif %}">
+                    <div class="event-phase-dot">{% if event.status == 'finished' %}✓{% else %}2{% endif %}</div>
+                    <span class="event-phase-label">In corso</span>
+                </div>
+                <div class="event-phase-conn {% if event.status == 'finished' %}done{% endif %}"></div>
+                <div class="event-phase-step {% if event.status == 'finished' %}active{% endif %}">
+                    <div class="event-phase-dot">3</div>
+                    <span class="event-phase-label">Concluso</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endblock %}
 
     <div id="event-section-content" class="event-layout">
         {% if event.status == "registration" %}
@@ -36,3 +62,304 @@
         {% endif %}
     </div>
 </div>
+{% endblock %}
+
+
+{% block event_setup %}
+<div class="form-section">
+    <details class="stages-setup-details" open>
+        <summary class="stages-setup-summary">
+            <span class="stages-setup-summary-label">Tipo di punteggio</span>
+        </summary>
+        {% block score_kind_section %}
+        <div id="score-kind-section">
+            <input type="hidden" name="event_version" value="{{ event.version }}">
+            {% for sk in score_kinds %}
+                {% set active = "active" if sk.kind == current_score_kind else "" %}
+                <button type="button" class="score-kind-item {{ active }}"
+                    name="score_kind" value="{{ sk.kind }}"
+                    hx-put="/api/events/{{ event.id }}/score_kind"
+                    hx-target="#score-kind-section"
+                    hx-swap="outerHTML"
+                    hx-include="[name='event_version']">
+                    {{ sk.label }}
+                </button>
+            {% endfor %}
+        </div>
+        {% endblock %}
+    </details>
+</div>
+
+<div class="form-section">
+    {% block stages_setup_section %}
+    <div id="stages-setup-section">
+        <details class="stages-setup-details" open>
+            <summary class="stages-setup-summary">
+                <span class="stages-setup-summary-label">Fasi del torneo</span>
+            </summary>
+
+            <div class="stage-setup-pipeline">
+                {% for stage in stages %}
+                    {% if not loop.first %}
+                        <div class="stage-setup-arrow">&#8595;</div>
+                    {% endif %}
+                    <div class="stage-setup-card">
+                        <div class="stage-setup-card-header">
+                            <span class="stage-setup-num">Fase {{ stage.stage_order }}</span>
+                        </div>
+                        <select name="kind"
+                            class="stage-kind-select-inline"
+                            hx-patch="/api/events/{{ event.id }}/stages/{{ stage.id }}"
+                            hx-trigger="change"
+                            hx-target="#stages-setup-section"
+                            hx-swap="outerHTML">
+                            {% for sk in stage_kinds %}
+                                <option value="{{ sk.kind }}" {{ 'selected' if sk.kind == stage.kind }}>{{ sk.label }}</option>
+                            {% endfor %}
+                        </select>
+                        {% if stage.kind == 'groups' %}
+                            <div class="stage-groups-setup">
+                                <span class="stage-groups-setup-label">Gironi</span>
+                                <div class="group-resize-controls">
+                                    {% if stage.num_groups > 1 %}
+                                        <button class="group-resize-btn"
+                                            hx-post="/api/events/{{ event.id }}/stages/{{ stage.id }}/num-groups"
+                                            hx-vals='{"num_groups": {{ stage.num_groups - 1 }}}'
+                                            hx-target="#stages-setup-section"
+                                            hx-swap="outerHTML">
+                                            &minus;
+                                        </button>
+                                    {% else %}
+                                        <button class="group-resize-btn" disabled>&minus;</button>
+                                    {% endif %}
+                                    <span class="group-resize-value">{{ stage.num_groups }}</span>
+                                    <button class="group-resize-btn"
+                                        hx-post="/api/events/{{ event.id }}/stages/{{ stage.id }}/num-groups"
+                                        hx-vals='{"num_groups": {{ stage.num_groups + 1 }}}'
+                                        hx-target="#stages-setup-section"
+                                        hx-swap="outerHTML">
+                                        &plus;
+                                    </button>
+                                </div>
+                            </div>
+                        {% endif %}
+                        <button class="btn-remove-stage"
+                            hx-delete="/api/events/{{ event.id }}/stages/{{ stage.id }}"
+                            hx-vals='{"event_version": {{ event.version }}}'
+                            hx-target="#stages-setup-section"
+                            hx-swap="outerHTML">
+                            Rimuovi questa fase
+                        </button>
+                    </div>
+                {% endfor %}
+
+                <button id="btn-add-stage" class="btn-add-stage"
+                    hx-post="/api/events/{{ event.id }}/stages"
+                    hx-vals='{"kind": "{{ stage_kinds[0].kind }}", "event_version": "{{ event.version }}"}'
+                    hx-target="#stages-setup-section"
+                    hx-swap="outerHTML">
+                    + Aggiungi fase
+                </button>
+            </div>
+        </details>
+    </div>
+    {% endblock %}
+</div>
+{% endblock %}
+
+
+{% block event_player_container %}
+<div id="event-player-container">
+    <details class="stages-setup-details" open>
+        <summary class="stages-setup-summary">
+            <span class="stages-setup-summary-label">Giocatori</span>
+        </summary>
+
+        <div class="event-players-container">
+            <div class="players-column available-column">
+                <h4 class="event-section-label">Disponibili</h4>
+                {% if not available_participants %}
+                    <div class="no-players-msg">Nessun giocatore disponibile</div>
+                {% else %}
+                    <div class="available-players-list">
+                        {% for participant in available_participants %}
+                            <div class="event-player-item available">
+                                <span>{{ participant.name }}</span>
+                                <button class="btn-enroll" title="Iscrivi" hx-post="/api/events/{{ event.id }}/enroll/{{ participant.id }}"
+                                    hx-target="#event-player-container" hx-trigger="click" hx-swap="outerHTML">
+                                    +
+                                </button>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+            </div>
+            <div class="players-column enrolled-column">
+                <h4 class="event-section-label">Iscritti</h4>
+                {% if not enrolled_participants %}
+                    <div class="no-players-msg">Nessun giocatore iscritto</div>
+                {% else %}
+                    <div class="enrolled-players-list">
+                        {% for participant in enrolled_participants %}
+                            <div id="enrolled-participant-{{ participant.id }}" class="event-player-item enrolled">
+                                <span>{{ participant.name }}</span>
+                                <button class="item-delete" aria-label="Rimuovi" hx-delete="/api/events/{{ event.id }}/enroll/{{ participant.id }}"
+                                    hx-target="#event-player-container" hx-trigger="click" hx-swap="outerHTML"></button>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </details>
+</div>
+{% endblock %}
+
+
+{% block stage_content %}
+<div class="event-stages-panel" id="stage-content">
+    <div class="stage-nav">
+        {% if stage_order > 1 %}
+            <button class="stage-arrow"
+                hx-get="/api/events/{{ event.id }}/stage/{{ stage_order - 1 }}"
+                hx-target="#stage-content"
+                hx-swap="outerHTML transition:true"
+                _="on click add .slide-back to <html/>">
+                &#8592;
+            </button>
+        {% else %}
+            <button class="stage-arrow" disabled>&#8592;</button>
+        {% endif %}
+        <span class="stage-indicator">
+            {{ stage.name }} ({{ stage_order }}/{{ total_stages }})
+        </span>
+        {% if stage_order < total_stages %}
+            <button class="stage-arrow"
+                hx-get="/api/events/{{ event.id }}/stage/{{ stage_order + 1 }}"
+                hx-target="#stage-content"
+                hx-swap="outerHTML transition:true"
+                _="on click remove .slide-back from <html/>">
+                &#8594;
+            </button>
+        {% else %}
+            <button class="stage-arrow" disabled>&#8594;</button>
+        {% endif %}
+    </div>
+
+    <div class="stage-body">
+        {% if stage_kind == "groups" %}
+            {% block stage_groups_content %}
+            <div id="stage-groups-content"
+                hx-ext="sse"
+                sse-connect="/api/events/{{ event.id }}/stages/{{ stage.id }}/sse">
+                {% block stage_groups_inner %}
+                <div id="stage-groups-inner"
+                    hx-trigger="sse:score-update"
+                    hx-get="/api/events/{{ event.id }}/stages/{{ stage.id }}/groups-content"
+                    hx-swap="outerHTML">
+                    <div class="stage-groups">
+                    {% for group in stage.groups %}
+                        <div class="group-card">
+                            <div class="group-header" _="on click toggle .collapsed on closest .group-card">
+                                <h4>{{ group.name }}</h4>
+                                <span class="group-toggle">&#9662;</span>
+                            </div>
+                            {% set ps = group.participants %}
+                            {% set n = ps | length %}
+                            <div class="group-grid-wrap">
+                                <div class="grid-row-labels">
+                                    <div class="grid-col-header-spacer"></div>
+                                    {% for i in range(0, n) %}
+                                        <div class="grid-row-header">{{ ps[i] }}</div>
+                                    {% endfor %}
+                                </div>
+                                <div class="grid-scroll">
+                                    <div class="grid-scores" style="grid-template-columns: repeat({{ n }}, 1fr);">
+                                        {% for j in range(0, n) %}
+                                            <div class="grid-col-header">{{ ps[j] }}</div>
+                                        {% endfor %}
+                                        {% for i in range(0, n) %}
+                                            {% for j in range(0, n) %}
+                                                {% if i == j %}
+                                                    <div class="grid-cell self">&#10005;</div>
+                                                {% elif j > i %}
+                                                    {% set match_info = group.scores.get(ps[i], {}).get(ps[j]) %}
+                                                    {% if match_info %}
+                                                        <div id="score-cell-{{ match_info.match_id }}"
+                                                            class="grid-cell{% if match_info.score %} has-score{% endif %}"
+                                                            hx-get="/api/events/{{ event.id }}/matches/{{ match_info.match_id }}/score/edit?p1_id={{ match_info.p1_id }}&p2_id={{ match_info.p2_id }}&score_kind={{ stage.score_kind }}"
+                                                            hx-target="#modal-container"
+                                                            hx-swap="innerHTML">
+                                                            {{ match_info.score or '-' }}
+                                                        </div>
+                                                    {% else %}
+                                                        <div class="grid-cell">-</div>
+                                                    {% endif %}
+                                                {% else %}
+                                                    <div class="grid-cell empty"></div>
+                                                {% endif %}
+                                            {% endfor %}
+                                        {% endfor %}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    {% endfor %}
+                    </div>
+                </div>
+                {% endblock %}
+            </div>
+            {% endblock %}
+        {% elif stage_kind == "single_elimination" %}
+            {% block stage_bracket_content %}
+            <div id="stage-bracket-content"
+                hx-ext="sse"
+                sse-connect="/api/events/{{ event.id }}/stages/{{ stage.id }}/sse">
+                {% block stage_bracket_inner %}
+                <div id="stage-bracket-inner"
+                    hx-trigger="sse:score-update"
+                    hx-get="/api/events/{{ event.id }}/stages/{{ stage.id }}/bracket-content"
+                    hx-swap="outerHTML">
+                    {% set rounds = stage.rounds %}
+                    {% if rounds %}
+                    {% set first_round_matches = rounds[0].matches | length %}
+                    {% set total_rows = first_round_matches * 2 %}
+                    {% set num_rounds = rounds | length %}
+
+                    <div class="stage-bracket"
+                        style="grid-template-columns: repeat({{ num_rounds }}, 150px); grid-template-rows: repeat({{ total_rows }}, 1fr);">
+                        {% for round in rounds %}
+                            {% set r = loop.index0 %}
+                            {% for match in round.matches %}
+                                {% set m = loop.index0 %}
+                                {% set row_start = m * (2 ** (r + 1)) + (2 ** r) %}
+                                {% if match.clickable %}
+                                <div class="bracket-match clickable"
+                                     style="grid-column: {{ r + 1 }}; grid-row: {{ row_start }} / span 2;"
+                                     hx-get="/api/events/{{ event.id }}/matches/{{ match.match_id }}/score/edit?p1_id={{ match.p1_id }}&p2_id={{ match.p2_id }}&score_kind={{ stage.score_kind }}"
+                                     hx-target="#modal-container"
+                                     hx-swap="innerHTML">
+                                {% else %}
+                                <div class="bracket-match"
+                                     style="grid-column: {{ r + 1 }}; grid-row: {{ row_start }} / span 2;">
+                                {% endif %}
+                                    <div class="bracket-participant bracket-top{% if match.winner_id and match.winner_id == match.p1_id %} bracket-winner{% endif %}">{{ match.p1 }}</div>
+                                    <div class="bracket-score">
+                                        {%- if match.has_score -%}{{ match.score }}{%- elif match.clickable -%}vs{%- endif -%}
+                                    </div>
+                                    <div class="bracket-participant bracket-bottom{% if match.winner_id and match.winner_id == match.p2_id %} bracket-winner{% endif %}">{{ match.p2 }}</div>
+                                </div>
+                            {% endfor %}
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <p>Nessun incontro in questa fase.</p>
+                    {% endif %}
+                </div>
+                {% endblock %}
+            </div>
+            {% endblock %}
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
