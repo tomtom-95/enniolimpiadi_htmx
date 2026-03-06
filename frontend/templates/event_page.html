@@ -1,3 +1,13 @@
+
+{#
+    ============================================================
+    BLOCK: event_page
+    The entire event page. The outer div listens for SSE
+    "status-update" events and reloads itself (outerHTML swap)
+    so that the whole page refreshes when the event status
+    changes (e.g. registration → started → finished).
+    ============================================================
+#}
 {% block event_page %}
     <div id="event-page"
          class="event-page"
@@ -8,49 +18,79 @@
          hx-target="#event-page"
          hx-swap="outerHTML">
         <h2 class="event-title">{{ event_name }}</h2>
+
+        {#
+            ------------------------------------------------------------
+            BLOCK: event_status_controls
+            The phase progress bar (Setup → In corso → Concluso).
+            Rendered standalone via OOB swap when the status changes,
+            so child templates can refresh only this part.
+            ------------------------------------------------------------
+        #}
         {% block event_status_controls %}
             <div id="event-status-controls"
                  {% if oob %}hx-swap-oob="true"{% endif %}>
                 <div class="event-phase-bar">
                     <div class="event-phase-steps">
-                        <div class="event-phase-step {% if event_status != 'registration' %}completed{% else %}active{% endif %}">
-                            <div class="event-phase-dot">
-                                {% if event_status != 'registration' %}
-                                    ✓
-                                {% else %}
-                                    1
-                                {% endif %}
-                            </div>
+                        {# Compute CSS classes and dot labels for each step based on current status #}
+                        {% set setup_step    = "completed" if event_status != "registration" else "active" %}
+                        {% set setup_dot     = "✓"         if event_status != "registration" else "1" %}
+                        {% set setup_conn    = "done"      if event_status != "registration" else "" %}
+                        {% set incorso_step  = "active"    if event_status == "started"      else ("completed" if event_status == "finished" else "") %}
+                        {% set incorso_dot   = "✓"         if event_status == "finished"     else "2" %}
+                        {% set incorso_conn  = "done"      if event_status == "finished"     else "" %}
+                        {% set concluso_step = "active"    if event_status == "finished"     else "" %}
+                        <div class="event-phase-step {{ setup_step }}">
+                            <div class="event-phase-dot">{{ setup_dot }}</div>
                             <span class="event-phase-label">Setup</span>
                         </div>
-                        <div class="event-phase-conn {% if event_status != 'registration' %}done{% endif %}"></div>
-                        <div class="event-phase-step {% if event_status == 'started' %}active{% elif event_status == 'finished' %}completed{% endif %}">
-                            <div class="event-phase-dot">
-                                {% if event_status == 'finished' %}
-                                    ✓
-                                {% else %}
-                                    2
-                                {% endif %}
-                            </div>
+                        <div class="event-phase-conn {{ setup_conn }}"></div>
+                        <div class="event-phase-step {{ incorso_step }}">
+                            <div class="event-phase-dot">{{ incorso_dot }}</div>
                             <span class="event-phase-label">In corso</span>
                         </div>
-                        <div class="event-phase-conn {% if event_status == 'finished' %}done{% endif %}"></div>
-                        <div class="event-phase-step {% if event_status == 'finished' %}active{% endif %}">
+                        <div class="event-phase-conn {{ incorso_conn }}"></div>
+                        <div class="event-phase-step {{ concluso_step }}">
                             <div class="event-phase-dot">3</div>
                             <span class="event-phase-label">Concluso</span>
                         </div>
                     </div>
                 </div>
             </div>
-        {% endblock %}
+        {% endblock %} {# event_status_controls #}
+
+        {#
+            ------------------------------------------------------------
+            SECTION: event-section-content
+            The main content area. Splits into two cases:
+              - event_status == "registration": show setup forms
+              - otherwise: show the stage content (brackets / groups)
+            ------------------------------------------------------------
+        #}
         <div id="event-section-content" class="event-layout">
+
             {% if event_status == "registration" %}
+
+                {#
+                    ............................................................
+                    BLOCK: event_setup
+                    Configuration panels shown only during registration:
+                      1. Score kind selector (SSE-refreshed)
+                      2. Stages pipeline editor (SSE-refreshed)
+                    ............................................................
+                #}
                 {% block event_setup %}
+                    {# --- Score kind selector --- #}
                     <div class="form-section">
                         <details class="stages-setup-details" open>
                             <summary class="stages-setup-summary">
                                 <span class="stages-setup-summary-label">Tipo di punteggio</span>
                             </summary>
+                            {#
+                                BLOCK: score_kind_section
+                                Listens for SSE "score-kind-update" and reloads itself.
+                                Renders a button per score kind; active one is highlighted.
+                            #}
                             {% block score_kind_section %}
                                 <div id="score-kind-section"
                                      hx-trigger="sse:score-kind-update"
@@ -68,10 +108,18 @@
                                                 hx-swap="outerHTML">{{ sk.label }}</button>
                                     {% endfor %}
                                 </div>
-                            {% endblock %}
+                            {% endblock %} {# score_kind_section #}
                         </details>
                     </div>
+
+                    {# --- Stages pipeline editor --- #}
                     <div class="form-section">
+                        {#
+                            BLOCK: stages_setup_section
+                            Listens for SSE "stages-update" and reloads itself.
+                            Renders a card per stage with kind selector and (for
+                            groups stages) a num-groups +/- control.
+                        #}
                         {% block stages_setup_section %}
                             <div id="stages-setup-section"
                                  hx-trigger="sse:stages-update"
@@ -89,6 +137,7 @@
                                                 <div class="stage-setup-card-header">
                                                     <span class="stage-setup-num">Fase {{ stage.stage_order }}</span>
                                                 </div>
+                                                {# Kind selector: clicking loads an inline edit widget #}
                                                 <div id="stage-kind-{{ stage.id }}" class="stage-kind-display">
                                                     <button type="button"
                                                             class="stage-kind-select-inline"
@@ -99,6 +148,7 @@
                                                         <span class="stage-kind-arrow">&#9660;</span>
                                                     </button>
                                                 </div>
+                                                {# Groups-only: +/- control for number of groups #}
                                                 {% if stage.kind == 'groups' %}
                                                     <div class="stage-groups-setup">
                                                         <span class="stage-groups-setup-label">Gironi</span>
@@ -120,13 +170,13 @@
                                                                     hx-swap="outerHTML">&plus;</button>
                                                         </div>
                                                     </div>
-                                                {% endif %}
+                                                {% endif %} {# stage.kind == 'groups' #}
                                                 <button class="btn-remove-stage"
                                                         hx-delete="/api/events/{{ event_id }}/stages/{{ stage.id }}"
                                                         hx-target="#stages-setup-section"
                                                         hx-swap="outerHTML">Rimuovi questa fase</button>
                                             </div>
-                                        {% endfor %}
+                                        {% endfor %} {# for stage in stages #}
                                         <button id="btn-add-stage"
                                                 class="btn-add-stage"
                                                 hx-post="/api/events/{{ event_id }}/stages"
@@ -136,9 +186,17 @@
                                     </div>
                                 </details>
                             </div>
-                        {% endblock %}
+                        {% endblock %} {# stages_setup_section #}
                     </div>
-                {% endblock %}
+                {% endblock %} {# event_setup #}
+
+                {#
+                    ............................................................
+                    BLOCK: event_player_container
+                    Two-column player list: available (left) and enrolled (right).
+                    Listens for SSE "enrollment-update" and reloads itself.
+                    ............................................................
+                #}
                 {% block event_player_container %}
                     <div id="event-player-container"
                          hx-trigger="sse:enrollment-update"
@@ -150,6 +208,7 @@
                                 <span class="stages-setup-summary-label">Giocatori</span>
                             </summary>
                             <div class="event-players-container">
+                                {# Left column: participants not yet enrolled #}
                                 <div class="players-column available-column">
                                     <h4 class="event-section-label">Disponibili</h4>
                                     {% if not available_participants %}
@@ -168,8 +227,9 @@
                                                 </div>
                                             {% endfor %}
                                         </div>
-                                    {% endif %}
+                                    {% endif %} {# not available_participants #}
                                 </div>
+                                {# Right column: participants already enrolled #}
                                 <div class="players-column enrolled-column">
                                     <h4 class="event-section-label">Iscritti</h4>
                                     {% if not enrolled_participants %}
@@ -189,15 +249,26 @@
                                                 </div>
                                             {% endfor %}
                                         </div>
-                                    {% endif %}
+                                    {% endif %} {# not enrolled_participants #}
                                 </div>
                             </div>
                         </details>
                     </div>
-                {% endblock %}
-            {% else %}
+                {% endblock %} {# event_player_container #}
+
+            {% else %} {# event_status != "registration" — event is started or finished #}
+
+                {#
+                    ............................................................
+                    BLOCK: stage_content
+                    Stage viewer shown when the event is running.
+                    Includes prev/next navigation between stages and the
+                    stage body which switches on stage_kind.
+                    ............................................................
+                #}
                 {% block stage_content %}
                     <div class="event-stages-panel" id="stage-content">
+                        {# Stage navigation: prev / indicator / next #}
                         <div class="stage-nav">
                             {% if stage_order > 1 %}
                                 <button class="stage-arrow"
@@ -205,9 +276,9 @@
                                         hx-target="#stage-content"
                                         hx-swap="outerHTML transition:true"
                                         _="on click add .slide-back to <html/>">&#8592;</button>
-                        {% else %}
-                            <button class="stage-arrow" disabled>&#8592;</button>
-                        {% endif %}
+                            {% else %}
+                                <button class="stage-arrow" disabled>&#8592;</button>
+                            {% endif %} {# stage_order > 1 #}
                         <span class="stage-indicator">{{ stage.name }} ({{ stage_order }}/{{ total_stages }})</span>
                         {% if stage_order < total_stages %}
                             <button class="stage-arrow"
@@ -215,133 +286,162 @@
                                     hx-target="#stage-content"
                                     hx-swap="outerHTML transition:true"
                                     _="on click remove .slide-back from <html/>">&#8594;</button>
-                    {% else %}
-                        <button class="stage-arrow" disabled>&#8594;</button>
-                    {% endif %}
-                </div>
-                <div class="stage-body">
-                    {% if stage_kind == "groups" %}
-                        {% block stage_groups_content %}
-                            <div id="stage-groups-content"
-                                 hx-ext="sse"
-                                 sse-connect="/api/events/{{ event_id }}/stages/{{ stage.id }}/sse">
-                                {% block stage_groups_inner %}
-                                    <div id="stage-groups-inner"
-                                         hx-trigger="sse:score-update"
-                                         hx-get="/api/events/{{ event_id }}/stages/{{ stage.id }}/groups-content"
-                                         hx-swap="outerHTML"
-                                         hx-target="this">
-                                        <div class="stage-groups">
-                                            {% for group in stage.groups %}
-                                                <div class="group-card">
-                                                    <div class="group-header"
-                                                         _="on click toggle .collapsed on closest .group-card">
-                                                        <h4>{{ group.name }}</h4>
-                                                        <span class="group-toggle">&#9662;</span>
-                                                    </div>
-                                                    {% set ps = group.participants %}
-                                                    {% set n = ps | length %}
-                                                    <div class="group-grid-wrap">
-                                                        <div class="grid-row-labels">
-                                                            <div class="grid-col-header-spacer"></div>
-                                                            {% for i in range(0, n) %}<div class="grid-row-header">{{ ps[i] }}</div>{% endfor %}
+                        {% else %}
+                            <button class="stage-arrow" disabled>&#8594;</button>
+                        {% endif %} {# stage_order < total_stages #}
+                    </div>
+
+                    {# Stage body: render groups grid or elimination bracket #}
+                    <div class="stage-body">
+                        {% if stage_kind == "groups" %}
+
+                            {#
+                                BLOCK: stage_groups_content / stage_groups_inner
+                                Groups stage: a score grid per group.
+                                The inner div listens for SSE "score-update" and
+                                reloads itself so scores refresh in real time.
+                                Clicking a cell opens a score-edit modal via OOB.
+                            #}
+                            {% block stage_groups_content %}
+                                <div id="stage-groups-content">
+                                    {% block stage_groups_inner %}
+                                        <div id="stage-groups-inner"
+                                             hx-trigger="sse:score-update"
+                                             hx-get="/api/events/{{ event_id }}/stages/{{ stage.id }}/groups-content"
+                                             hx-swap="outerHTML"
+                                             hx-target="this">
+                                            <div class="stage-groups">
+                                                {% for group in stage.groups %}
+                                                    <div class="group-card">
+                                                        <div class="group-header"
+                                                             _="on click toggle .collapsed on closest .group-card">
+                                                            <h4>{{ group.name }}</h4>
+                                                            <span class="group-toggle">&#9662;</span>
                                                         </div>
-                                                        <div class="grid-scroll">
-                                                            <div class="grid-scores"
-                                                                 style="grid-template-columns: repeat({{ n }}, 1fr)">
-                                                                {% for j in range(0, n) %}<div class="grid-col-header">{{ ps[j] }}</div>{% endfor %}
-                                                                {% for i in range(0, n) %}
-                                                                    {% for j in range(0, n) %}
-                                                                        {% if i == j %}
-                                                                            <div class="grid-cell self">&#10005;</div>
-                                                                        {% elif j > i %}
-                                                                            {% set match_info = group.scores.get(ps[i], {}).get(ps[j]) %}
-                                                                            {% if match_info %}
-                                                                                <div id="score-cell-{{ match_info.match_id }}"
-                                                                                     class="grid-cell{% if match_info.score %} has-score{% endif %}"
-                                                                                     hx-get="/api/events/{{ event_id }}/matches/{{ match_info.match_id }}/score/edit?p1_id={{ match_info.p1_id }}&p2_id={{ match_info.p2_id }}&score_kind={{ stage.score_kind }}"
-                                                                                     hx-target="#modal-container"
-                                                                                     hx-swap="innerHTML">
-                                                                                    {{ match_info.score or '-' }}
-                                                                                </div>
+                                                        {% set ps = group.participants %}
+                                                        {% set n = ps | length %}
+                                                        {# Score grid: rows = ps[i] (row labels), cols = ps[j] (col headers) #}
+                                                        <div class="group-grid-wrap">
+                                                            <div class="grid-row-labels">
+                                                                <div class="grid-col-header-spacer"></div>
+                                                                {% for i in range(0, n) %}<div class="grid-row-header">{{ ps[i] }}</div>{% endfor %}
+                                                            </div>
+                                                            <div class="grid-scroll">
+                                                                <div class="grid-scores"
+                                                                     style="grid-template-columns: repeat({{ n }}, 1fr)">
+                                                                    {% for j in range(0, n) %}<div class="grid-col-header">{{ ps[j] }}</div>{% endfor %}
+                                                                    {# Cell logic: diagonal = X, upper triangle = score cell, lower = empty #}
+                                                                    {% for i in range(0, n) %}
+                                                                        {% for j in range(0, n) %}
+                                                                            {% if i == j %}
+                                                                                <div class="grid-cell self">&#10005;</div>
+                                                                            {% elif j > i %}
+                                                                                {% set match_info = group.scores.get(ps[i], {}).get(ps[j]) %}
+                                                                                {% if match_info %}
+                                                                                    <div id="score-cell-{{ match_info.match_id }}"
+                                                                                         class="grid-cell{% if match_info.score %} has-score{% endif %}"
+                                                                                         hx-get="/api/events/{{ event_id }}/matches/{{ match_info.match_id }}/score/edit?p1_id={{ match_info.p1_id }}&p2_id={{ match_info.p2_id }}&score_kind={{ stage.score_kind }}"
+                                                                                         hx-target="#modal-container"
+                                                                                         hx-swap="innerHTML">
+                                                                                        {{ match_info.score or '-' }}
+                                                                                    </div>
+                                                                                {% else %}
+                                                                                    <div class="grid-cell">-</div>
+                                                                                {% endif %} {# match_info #}
                                                                             {% else %}
-                                                                                <div class="grid-cell">-</div>
-                                                                            {% endif %}
-                                                                        {% else %}
-                                                                            <div class="grid-cell empty"></div>
-                                                                        {% endif %}
-                                                                    {% endfor %}
-                                                                {% endfor %}
+                                                                                <div class="grid-cell empty"></div>
+                                                                            {% endif %} {# i == j / j > i #}
+                                                                        {% endfor %} {# for j #}
+                                                                    {% endfor %} {# for i #}
+                                                                </div>
                                                             </div>
                                                         </div>
                                                     </div>
-                                                </div>
-                                            {% endfor %}
+                                                {% endfor %} {# for group #}
+                                            </div>
                                         </div>
-                                    </div>
-                                {% endblock %}
-                            </div>
-                        {% endblock %}
-                    {% elif stage_kind == "single_elimination" %}
-                        {% block stage_bracket_content %}
-                            <div id="stage-bracket-content"
-                                 hx-ext="sse"
-                                 sse-connect="/api/events/{{ event_id }}/stages/{{ stage.id }}/sse">
-                                {% block stage_bracket_inner %}
-                                    <div id="stage-bracket-inner"
-                                         hx-trigger="sse:score-update"
-                                         hx-get="/api/events/{{ event_id }}/stages/{{ stage.id }}/bracket-content"
-                                         hx-target="this"
-                                         hx-swap="outerHTML">
-                                        {% set rounds = stage.rounds %}
-                                        {% if rounds %}
-                                            {% set first_round_matches = rounds[0].matches | length %}
-                                            {% set total_rows = first_round_matches * 2 %}
-                                            {% set num_rounds = rounds | length %}
-                                            <div class="stage-bracket"
-                                                 style="grid-template-columns: repeat({{ num_rounds }}, 150px);
-                                                        grid-template-rows: repeat({{ total_rows }}, 1fr)">
-                                                {% for round in rounds %}
-                                                    {% set r = loop.index0 %}
-                                                    {% for match in round.matches %}
-                                                        {% set m = loop.index0 %}
-                                                        {% set row_start = m * (2 ** (r + 1)) + (2 ** r) %}
-                                                        {% if match.clickable %}
-                                                            <div class="bracket-match clickable"
-                                                                 style="grid-column: {{ r + 1 }};
-                                                                        grid-row: {{ row_start }} / span 2"
-                                                                 hx-get="/api/events/{{ event_id }}/matches/{{ match.match_id }}/score/edit?p1_id={{ match.p1_id }}&p2_id={{ match.p2_id }}&score_kind={{ stage.score_kind }}"
-                                                                 hx-target="#modal-container"
-                                                                 hx-swap="innerHTML">
+                                    {% endblock %} {# stage_groups_inner #}
+                                </div>
+                            {% endblock %} {# stage_groups_content #}
+
+                        {% elif stage_kind == "single_elimination" %}
+
+                            {#
+                                BLOCK: stage_bracket_content / stage_bracket_inner
+                                Single-elimination bracket: matches laid out on a CSS grid.
+                                row_start is computed so that matches align correctly across
+                                rounds (each round doubles the row span).
+                                Clickable matches open a score-edit modal.
+                            #}
+                            {% block stage_bracket_content %}
+                                <div id="stage-bracket-content">
+                                    {% block stage_bracket_inner %}
+                                        <div id="stage-bracket-inner"
+                                             hx-trigger="sse:score-update"
+                                             hx-get="/api/events/{{ event_id }}/stages/{{ stage.id }}/bracket-content"
+                                             hx-target="this"
+                                             hx-swap="outerHTML">
+                                            {% set rounds = stage.rounds %}
+                                            {% if rounds %}
+                                                {% set first_round_matches = rounds[0].matches | length %}
+                                                {% set total_rows = first_round_matches * 2 %}
+                                                {% set num_rounds = rounds | length %}
+                                                <div class="stage-bracket"
+                                                     style="grid-template-columns: repeat({{ num_rounds }}, 150px);
+                                                            grid-template-rows: repeat({{ total_rows }}, 1fr)">
+                                                    {% for round in rounds %}
+                                                        {% set r = loop.index0 %}
+                                                        {% for match in round.matches %}
+                                                            {% set m = loop.index0 %}
+                                                            {% set row_start = m * (2 ** (r + 1)) + (2 ** r) %}
+                                                            {# Clickable matches (both players known) open the score modal #}
+                                                            {% if match.clickable %}
+                                                                <div class="bracket-match clickable"
+                                                                     style="grid-column: {{ r + 1 }};
+                                                                            grid-row: {{ row_start }} / span 2"
+                                                                     hx-get="/api/events/{{ event_id }}/matches/{{ match.match_id }}/score/edit?p1_id={{ match.p1_id }}&p2_id={{ match.p2_id }}&score_kind={{ stage.score_kind }}"
+                                                                     hx-target="#modal-container"
+                                                                     hx-swap="innerHTML">
                                                             {% else %}
                                                                 <div class="bracket-match"
                                                                      style="grid-column: {{ r + 1 }};
                                                                             grid-row: {{ row_start }} / span 2">
-                                                                {% endif %}
+                                                            {% endif %} {# match.clickable #}
                                                                 <div class="bracket-participant bracket-top{% if match.winner_id and match.winner_id == match.p1_id %} bracket-winner{% endif %}">
                                                                     {{ match.p1 }}
                                                                 </div>
                                                                 <div class="bracket-score">{%- if match.has_score -%}{{ match.score }}{%- elif match.clickable -%}vs{%- endif -%}</div>
-                                                                    <div class="bracket-participant bracket-bottom{% if match.winner_id and match.winner_id == match.p2_id %} bracket-winner{% endif %}">
-                                                                        {{ match.p2 }}
-                                                                    </div>
+                                                                <div class="bracket-participant bracket-bottom{% if match.winner_id and match.winner_id == match.p2_id %} bracket-winner{% endif %}">
+                                                                    {{ match.p2 }}
                                                                 </div>
-                                                            {% endfor %}
-                                                        {% endfor %}
-                                                    </div>
-                                                {% else %}
-                                                    <p>Nessun incontro in questa fase.</p>
-                                                {% endif %}
-                                            </div>
-                                        {% endblock %}
-                                    </div>
-                                {% endblock %}
-                            {% endif %}
-                        </div>
-                    </div>
-                {% endblock %}
-            {% endif %}
-        </div>
+                                                            </div>
+                                                        {% endfor %} {# for match #}
+                                                    {% endfor %} {# for round #}
+                                                </div>
+                                            {% else %}
+                                                <p>Nessun incontro in questa fase.</p>
+                                            {% endif %} {# rounds #}
+                                        </div>
+                                    {% endblock %} {# stage_bracket_inner #}
+                                </div>
+                            {% endblock %} {# stage_bracket_content #}
+
+                        {% endif %} {# stage_kind #}
+                    </div> {# stage-body #}
+                    </div> {# stage-content #}
+                {% endblock %} {# stage_content #}
+
+            {% endif %} {# event_status == "registration" #}
+
+        </div> {# event-section-content #}
+
+        {#
+            ------------------------------------------------------------
+            SECTION: event-page-action
+            Bottom action button: start event (during registration) or
+            go back to registration (when event is already running).
+            ------------------------------------------------------------
+        #}
         <div class="event-page-action">
             {% if event_status == "registration" %}
                 <button class="event-phase-btn phase-btn-start"
@@ -353,7 +453,7 @@
                         hx-post="/api/events/{{ event_id }}/back-to-registration"
                         hx-target="#event-page"
                         hx-swap="outerHTML">← Torna alla registrazione</button>
-            {% endif %}
+            {% endif %} {# event_status == "registration" #}
         </div>
     </div>
-{% endblock %}
+{% endblock %} {# event_page #}

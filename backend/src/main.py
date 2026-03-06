@@ -272,7 +272,6 @@ def check_min_participants(request: Request, event_id: int, min_count: int):
     return total >= min_count
 
 
-_stage_subscribers: dict[int, set] = defaultdict(set)
 _event_subscribers: dict[int, set] = defaultdict(set)
 
 
@@ -705,9 +704,7 @@ async def update_match_score(
 
         conn.commit()
 
-        msg = "event: score-update\ndata: \n\n"
-        for queue in list(_stage_subscribers.get(stage_id, [])):
-            queue.put_nowait(msg)
+        notify_event(event_id, "score-update")
 
         if stage_kind == "single_elimination":
             stage = events.present_single_elimination_stage(conn, stage_id)
@@ -1821,33 +1818,12 @@ def get_stages_section(request: Request, event_id: int):
     return HTMLResponse(_render_stages_section_html(conn, event_id))
 
 
-# ---------------------------------------------------------------------------
-# Stage SSE stream
-# ---------------------------------------------------------------------------
-
-@app.get("/api/events/{event_id}/stages/{stage_id}/sse")
-async def stage_sse(request: Request, event_id: int, stage_id: int):
-    queue: asyncio.Queue = asyncio.Queue()
-    _stage_subscribers[stage_id].add(queue)
-
-    async def generate():
-        try:
-            while True:
-                try:
-                    data = await asyncio.wait_for(queue.get(), timeout=25.0)
-                    if data is None:  # shutdown sentinel
-                        break
-                    yield data
-                except asyncio.TimeoutError:
-                    yield ": keepalive\n\n"
-        finally:
-            _stage_subscribers[stage_id].discard(queue)
-
-    media_type = "text/event-stream"
-    headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
-    return StreamingResponse(generate(), media_type=media_type, headers=headers)
-
-
+# What happens if an admin delete the event the user is looking?
+# Right now for every endpoint that does stuff on the event I need
+# to check that the event has not been deleted
+# What I would like is to have all the user be informed that the olympiad has been deleted through a
+# modal that appears so that the user can then click an "Update Application" button and come to the
+# starting page
 @app.get("/api/events/{event_id}/sse")
 async def event_sse(request: Request, event_id: int):
     queue: asyncio.Queue = asyncio.Queue()
