@@ -273,6 +273,13 @@ def check_min_participants(request: Request, event_id: int, min_count: int):
 
 
 _stage_subscribers: dict[int, set] = defaultdict(set)
+_event_subscribers: dict[int, set] = defaultdict(set)
+
+
+def notify_event(event_id: int, event_name: str):
+    msg = f"event: {event_name}\ndata: \n\n"
+    for queue in list(_event_subscribers.get(event_id, [])):
+        queue.put_nowait(msg)
 
 
 @asynccontextmanager
@@ -705,12 +712,12 @@ async def update_match_score(
         if stage_kind == "single_elimination":
             stage = events.present_single_elimination_stage(conn, stage_id)
             html_content = render_fragment("stage_bracket_inner",
-                stage=stage, event={"id": event_id, "version": new_event_version})
+                stage=stage, event_id=event_id, event_version=new_event_version)
             extra_headers["HX-Retarget"] = "#stage-bracket-inner"
         else:
             stage = events.present_groups_stage(conn, stage_id)
             html_content = render_fragment("stage_groups_inner",
-                stage=stage, event={"id": event_id, "version": new_event_version})
+                stage=stage, event_id=event_id, event_version=new_event_version)
             extra_headers["HX-Retarget"] = "#stage-groups-inner"
 
         extra_headers["HX-Reswap"] = "outerHTML"
@@ -729,8 +736,7 @@ def get_bracket_content(request: Request, event_id: int, stage_id: int):
     conn = request.state.conn
     stage = events.present_single_elimination_stage(conn, stage_id)
     event_version = conn.execute("SELECT version FROM events WHERE id = ?", (event_id,)).fetchone()["version"]
-    return HTMLResponse(render_fragment("stage_bracket_inner",
-        stage=stage, event={"id": event_id, "version": event_version}))
+    return HTMLResponse(render_fragment("stage_bracket_inner", stage=stage, event_id=event_id, event_version=event_version))
 
 
 def _cancel_edit(request: Request, entities: str, item_id: int, name: str):
@@ -1054,8 +1060,9 @@ def create_event(request: Request, name: str = Form(...)):
             "INSERT INTO events (name, olympiad_id, score_kind) VALUES (?, ?, 'points') RETURNING id, name, version",
             (name, olympiad_id)
         ).fetchone()
-        event_data = {"id": event["id"], "name": event["name"], "version": event["version"], "status": "registration"}
-        html_content = render_fragment("event_page", event=event_data)
+        html_content = render_fragment("event_page",
+            event_id=event["id"], event_name=event["name"],
+            event_version=event["version"], event_status="registration")
 
     html_content += _oob_badge_html(request, olympiad_id)
     response = HTMLResponse(html_content)
@@ -1208,7 +1215,7 @@ def delete_events(request: Request, entity_id: int, entity_name: str = Query(...
 def select_event(
     request: Request,
     event_id: int,
-    event_name: str = Query(..., alias="name")
+    event_name: str = Query(None, alias="name")
 ):
     conn = request.state.conn
 
@@ -1227,7 +1234,7 @@ def select_event(
         result = Status.OLYMPIAD_RENAMED
     if result == Status.SUCCESS and not check_entity_exist(request, "events", event_id):
         result = Status.ENTITY_NOT_FOUND
-    if result == Status.SUCCESS and not check_entity_name(request, "events", event_id, event_name):
+    if result == Status.SUCCESS and event_name is not None and not check_entity_name(request, "events", event_id, event_name):
         result = Status.ENTITY_RENAMED
 
     html_content, extra_headers = _render_operation_denied(result, olympiad_id, "events")
@@ -1251,70 +1258,102 @@ def select_event(
             (event_id,)
         ).fetchone()
         event_status = derive_event_status(event["current_stage_order"], max_stage_order)
-        event_data = {
-            "id": event["id"],
-            "name": event["name"],
-            "version": event["version"],
-            "status": event_status
-        }
-
         extra_ctx = {}
         if event_status == "registration":
-            current_score_kind = event["score_kind"]
-            stage_kinds = conn.execute(
-                "SELECT kind, label FROM stage_kinds ORDER BY kind"
-            ).fetchall()
-            stages = conn.execute(
-                "SELECT es.id, es.stage_order, es.kind, sk.label, "
-                "COALESCE((SELECT COUNT(*) FROM groups g WHERE g.event_stage_id = es.id), 0) AS num_groups "
-                "FROM event_stages es JOIN stage_kinds sk ON sk.kind = es.kind "
-                "WHERE es.event_id = ? ORDER BY es.stage_order",
-                (event_id,)
-            ).fetchall()
+            extra_ctx = _get_registration_ctx(conn, event_id, olympiad_id, event["score_kind"])
+        else:
+            extra_ctx = _get_stage_ctx(conn, event_id, event["current_stage_order"])
 
-            enrolled_participants = conn.execute(
-                """
-                SELECT ep.participant_id AS id, COALESCE(pl.name, t.name) AS name
-                FROM event_participants ep
-                JOIN participants p ON p.id = ep.participant_id
-                LEFT JOIN players pl ON pl.id = p.player_id
-                LEFT JOIN teams t ON t.id = p.team_id
-                WHERE ep.event_id = ?
-                ORDER BY name
-                """,
-                (event_id,)
-            ).fetchall()
-            enrolled_ids = {p["id"] for p in enrolled_participants}
-
-            all_participants = conn.execute(
-                """
-                SELECT p.id, COALESCE(pl.name, t.name) AS name
-                FROM participants p
-                LEFT JOIN players pl ON pl.id = p.player_id
-                LEFT JOIN teams t ON t.id = p.team_id
-                WHERE COALESCE(pl.olympiad_id, t.olympiad_id) = ?
-                ORDER BY name
-                """,
-                (olympiad_id,)
-            ).fetchall()
-            available_participants = [p for p in all_participants if p["id"] not in enrolled_ids]
-
-            extra_ctx = dict(
-                score_kinds=SCORE_KINDS,
-                current_score_kind=current_score_kind,
-                stage_kinds=stage_kinds,
-                stages=stages,
-                enrolled_participants=enrolled_participants,
-                available_participants=available_participants,
-            )
-
-        html_content = render_fragment("event_page", event=event_data, **extra_ctx)
+        html_content = render_fragment("event_page",
+            event_id=event["id"], event_name=event["name"],
+            event_version=event["version"], event_status=event_status,
+            **extra_ctx)
 
     html_content += _oob_badge_html(request, olympiad_id)
     response = HTMLResponse(html_content)
     response.headers.update(extra_headers)
 
     return response
+
+
+def _get_registration_ctx(conn, event_id: int, olympiad_id: int, score_kind: str) -> dict:
+    stage_kinds = conn.execute(
+        "SELECT kind, label FROM stage_kinds ORDER BY kind"
+    ).fetchall()
+    stages = conn.execute(
+        "SELECT es.id, es.stage_order, es.kind, sk.label, "
+        "COALESCE((SELECT COUNT(*) FROM groups g WHERE g.event_stage_id = es.id), 0) AS num_groups "
+        "FROM event_stages es JOIN stage_kinds sk ON sk.kind = es.kind "
+        "WHERE es.event_id = ? ORDER BY es.stage_order",
+        (event_id,)
+    ).fetchall()
+    enrolled_participants = conn.execute(
+        """
+        SELECT ep.participant_id AS id, COALESCE(pl.name, t.name) AS name
+        FROM event_participants ep
+        JOIN participants p ON p.id = ep.participant_id
+        LEFT JOIN players pl ON pl.id = p.player_id
+        LEFT JOIN teams t ON t.id = p.team_id
+        WHERE ep.event_id = ?
+        ORDER BY name
+        """,
+        (event_id,)
+    ).fetchall()
+    enrolled_ids = {p["id"] for p in enrolled_participants}
+    all_participants = conn.execute(
+        """
+        SELECT p.id, COALESCE(pl.name, t.name) AS name
+        FROM participants p
+        LEFT JOIN players pl ON pl.id = p.player_id
+        LEFT JOIN teams t ON t.id = p.team_id
+        WHERE COALESCE(pl.olympiad_id, t.olympiad_id) = ?
+        ORDER BY name
+        """,
+        (olympiad_id,)
+    ).fetchall()
+    available_participants = [p for p in all_participants if p["id"] not in enrolled_ids]
+    return dict(
+        score_kinds=SCORE_KINDS,
+        current_score_kind=score_kind,
+        stage_kinds=stage_kinds,
+        stages=stages,
+        enrolled_participants=enrolled_participants,
+        available_participants=available_participants,
+    )
+
+
+def _get_stage_ctx(conn, event_id: int, stage_order: int) -> dict:
+    row = conn.execute(
+        """
+        SELECT es.id, es.stage_order, es.kind, sk.label
+        FROM event_stages es
+        JOIN stage_kinds sk ON sk.kind = es.kind
+        WHERE es.event_id = ? AND es.stage_order = ?
+        """,
+        (event_id, stage_order)
+    ).fetchone()
+
+    if not row:
+        return {}
+
+    stage_id   = row["id"]
+    stage_kind = row["kind"]
+    stage_label = row["label"]
+
+    total_stages = conn.execute(
+        "SELECT COUNT(*) AS count FROM event_stages WHERE event_id = ?",
+        (event_id,)
+    ).fetchone()["count"]
+
+    if stage_kind == "groups":
+        stage = events.present_groups_stage(conn, stage_id)
+    elif stage_kind == "single_elimination":
+        stage = events.present_single_elimination_stage(conn, stage_id)
+    else:
+        return {}
+
+    stage["name"] = stage_label
+    return dict(stage=stage, stage_kind=stage_kind, stage_order=stage_order, total_stages=total_stages)
 
 
 def _set_event_stage_order(request: Request, event_id: int, new_stage_order: int):
@@ -1355,12 +1394,20 @@ def _set_event_stage_order(request: Request, event_id: int, new_stage_order: int
         max_stage_order = max_stage["max_order"] if max_stage else None
 
         event = conn.execute(
-            "SELECT id, name, version FROM events WHERE id = ?",
+            "SELECT id, name, version, score_kind FROM events WHERE id = ?",
             (event_id,)
         ).fetchone()
         event_status = derive_event_status(new_stage_order, max_stage_order)
-        event_data = {"id": event["id"], "name": event["name"], "version": event["version"], "status": event_status}
-        html_content = render_fragment("event_page", event=event_data)
+        extra_ctx = {}
+        if event_status == "registration":
+            extra_ctx = _get_registration_ctx(conn, event_id, olympiad_id, event["score_kind"])
+        else:
+            extra_ctx = _get_stage_ctx(conn, event_id, new_stage_order)
+
+        html_content = render_fragment("event_page",
+            event_id=event["id"], event_name=event["name"],
+            event_version=event["version"], event_status=event_status,
+            **extra_ctx)
 
     html_content += _oob_badge_html(request, olympiad_id)
     response = HTMLResponse(html_content)
@@ -1368,6 +1415,7 @@ def _set_event_stage_order(request: Request, event_id: int, new_stage_order: int
 
     if result == Status.SUCCESS:
         conn.commit()
+        notify_event(event_id, "status-update")
     else:
         conn.rollback()
 
@@ -1436,7 +1484,7 @@ def get_event_players(request: Request, event_id: int):
         ).fetchall()
         available_participants = [ p for p in all_participants if p["id"] not in enrolled_ids ]
         html_content = render_fragment("event_player_container",
-            event={"id": event_id},
+            event_id=event_id,
             enrolled_participants=enrolled_participants,
             available_participants=available_participants)
 
@@ -1509,7 +1557,7 @@ def get_event_stage(request: Request, event_id: int, stage_order: int):
                     stage_kind=stage_kind,
                     stage_order=stage_order,
                     total_stages=total_stages,
-                    event={"id": event_id, "version": row["event_version"]},
+                    event_id=event_id, event_version=row["event_version"],
                 )
 
     html_content += _oob_badge_html(request, olympiad_id)
@@ -1525,7 +1573,6 @@ def resize_stage_groups(
     event_id: int,
     stage_id: int,
     num_groups: int = Form(...),
-    event_version: int = Form(...)
 ):
     conn = request.state.conn
 
@@ -1548,8 +1595,6 @@ def resize_stage_groups(
         result = Status.NOT_AUTHORIZED
     if result == Status.SUCCESS and not check_event_in_registration(request, event_id):
         result = Status.EVENT_NOT_IN_REGISTRATION
-    if result == Status.SUCCESS and not check_event_version(request, event_id, event_version):
-        result = Status.EVENT_VERSION_OUTDATED
     if result == Status.SUCCESS and not check_stage_kind_valid(request, stage_id, event_id):
         result = Status.STAGE_INVALID
     if result == Status.SUCCESS and not check_min_participants(request, event_id, 2):
@@ -1567,7 +1612,7 @@ def resize_stage_groups(
         ).fetchone()["version"]
         stage = events.present_groups_stage(conn, stage_id)
         html_content = render_fragment("stage_groups_content",
-            stage=stage, event={"id": event_id, "version": new_version})
+            stage=stage, event_id=event_id, event_version=new_version)
 
     html_content += _oob_badge_html(request, olympiad_id)
     response = HTMLResponse(html_content)
@@ -1582,19 +1627,27 @@ def resize_stage_groups(
 
 
 @app.get("/api/events/{event_id}/stages/{stage_id}/kind/edit")
-def get_edit_stage_kind(request: Request, event_id: int, stage_id: int):
+def get_edit_stage_kind(
+    request: Request,
+    event_id: int,
+    stage_id: int,
+):
     conn = request.state.conn
     row = conn.execute(
         "SELECT es.kind, sk.label FROM event_stages es JOIN stage_kinds sk ON sk.kind = es.kind WHERE es.id = ? AND es.event_id = ?",
         (stage_id, event_id)
     ).fetchone()
     stage_kinds = conn.execute("SELECT kind, label FROM stage_kinds ORDER BY kind").fetchall()
-    return templates.TemplateResponse(request, "edit_stage_kind.html", {
-        "stage_id": stage_id,
-        "event_id": event_id,
-        "current_kind": row["kind"],
-        "stage_kinds": stage_kinds,
-    })
+    return templates.TemplateResponse(
+        request,
+        "edit_stage_kind.html",
+        {
+            "stage_id": stage_id,
+            "event_id": event_id,
+            "current_kind": row["kind"],
+            "stage_kinds": stage_kinds,
+        }
+    )
 
 
 @app.get("/api/events/{event_id}/stages/{stage_id}/kind/cancel-edit")
@@ -1671,6 +1724,7 @@ def update_stage_kind(
 
     if result == Status.SUCCESS:
         conn.commit()
+        notify_event(event_id, "stages-update")
     else:
         conn.rollback()
 
@@ -1722,6 +1776,7 @@ def set_stage_num_groups(
 
     if result == Status.SUCCESS:
         conn.commit()
+        notify_event(event_id, "stages-update")
     else:
         conn.rollback()
 
@@ -1740,7 +1795,30 @@ def get_stage_groups_content(request: Request, event_id: int, stage_id: int):
         "SELECT version FROM events WHERE id = ?", (event_id,)
     ).fetchone()["version"]
     return HTMLResponse(render_fragment("stage_groups_inner",
-        stage=stage, event={"id": event_id, "version": event_version}))
+        stage=stage, event_id=event_id, event_version=event_version))
+
+
+# ---------------------------------------------------------------------------
+# Event setup section refresh endpoints (used by SSE-triggered refresh)
+# ---------------------------------------------------------------------------
+
+@app.get("/api/events/{event_id}/score-kind-section")
+def get_score_kind_section(request: Request, event_id: int):
+    conn = request.state.conn
+    row = conn.execute(
+        "SELECT score_kind, version FROM events WHERE id = ?", (event_id,)
+    ).fetchone()
+    return HTMLResponse(render_fragment("score_kind_section",
+        event_id=event_id, event_version=row["version"],
+        score_kinds=SCORE_KINDS,
+        current_score_kind=row["score_kind"],
+    ))
+
+
+@app.get("/api/events/{event_id}/stages-section")
+def get_stages_section(request: Request, event_id: int):
+    conn = request.state.conn
+    return HTMLResponse(_render_stages_section_html(conn, event_id))
 
 
 # ---------------------------------------------------------------------------
@@ -1770,6 +1848,29 @@ async def stage_sse(request: Request, event_id: int, stage_id: int):
     return StreamingResponse(generate(), media_type=media_type, headers=headers)
 
 
+@app.get("/api/events/{event_id}/sse")
+async def event_sse(request: Request, event_id: int):
+    queue: asyncio.Queue = asyncio.Queue()
+    _event_subscribers[event_id].add(queue)
+
+    async def generate():
+        try:
+            while True:
+                try:
+                    data = await asyncio.wait_for(queue.get(), timeout=25.0)
+                    if data is None:
+                        break
+                    yield data
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+        finally:
+            _event_subscribers[event_id].discard(queue)
+
+    media_type = "text/event-stream"
+    headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    return StreamingResponse(generate(), media_type=media_type, headers=headers)
+
+
 # ---------------------------------------------------------------------------
 # Event live-editing endpoints
 # ---------------------------------------------------------------------------
@@ -1778,7 +1879,6 @@ async def stage_sse(request: Request, event_id: int, stage_id: int):
 def update_event_score_kind(
     request: Request,
     event_id: int,
-    event_version: int = Form(...),
     score_kind: str = Form(...)
 ):
     conn = request.state.conn
@@ -1800,25 +1900,20 @@ def update_event_score_kind(
         result = Status.ENTITY_NOT_FOUND
     if result == Status.SUCCESS and not check_event_in_registration(request, event_id):
         result = Status.EVENT_NOT_IN_REGISTRATION
-    if result == Status.SUCCESS and not check_event_version(request, event_id, event_version):
-        result = Status.EVENT_VERSION_OUTDATED
     if result == Status.SUCCESS and not check_user_authorized(request, olympiad_id):
         result = Status.NOT_AUTHORIZED
-    
+
     html_content, extra_headers = _render_operation_denied(result, olympiad_id, "events")
 
     if result == Status.ENTITY_NOT_FOUND:
         html_content = templates.get_template("entity_deleted_oob.html").render()
     elif result == Status.SUCCESS:
-        conn.execute("UPDATE events SET score_kind = ? WHERE id = ?", (score_kind, event_id))
-        # ctx = {
-        #     "event_id": event_id,
-        #     "score_kind": SCORE_KINDS,
-        #     "current_score_kind": score_kind,
-        #     "event_version": event_version
-        # }
+        event_version = conn.execute(
+            "UPDATE events SET score_kind = ? WHERE id = ? RETURNING version",
+            (score_kind, event_id)
+        ).fetchone()["version"]
         html_content = render_fragment("score_kind_section",
-            event={"id": event_id, "version": event_version},
+            event_id=event_id, event_version=event_version,
             score_kinds=SCORE_KINDS,
             current_score_kind=score_kind,
         )
@@ -1831,6 +1926,7 @@ def update_event_score_kind(
 
     if result == Status.SUCCESS:
         conn.commit()
+        notify_event(event_id, "score-kind-update")
     else:
         conn.rollback()
 
@@ -1877,7 +1973,7 @@ def get_event_setup(request: Request, event_id: int, version: int = Query(...)):
         ).fetchall()
 
         html_content = render_fragment("event_setup",
-            event={"id": event_id, "version": version},
+            event_id=event_id, event_version=version,
             score_kinds=SCORE_KINDS,
             current_score_kind=current_score_kind,
             stage_kinds=stage_kinds,
@@ -1895,7 +1991,6 @@ def get_event_setup(request: Request, event_id: int, version: int = Query(...)):
 def add_event_stage(
     request: Request,
     event_id: int,
-    event_version: int = Form(...),
     kind: str = Form(...)
 ):
     conn = request.state.conn
@@ -1915,8 +2010,6 @@ def add_event_stage(
         result = Status.OLYMPIAD_RENAMED
     if result == Status.SUCCESS and not check_entity_exist(request, "events", event_id):
         result = Status.ENTITY_NOT_FOUND
-    if result == Status.SUCCESS and not check_event_version(request, event_id, event_version):
-        result = Status.EVENT_VERSION_OUTDATED
     if result == Status.SUCCESS and not check_user_authorized(request, olympiad_id):
         result = Status.NOT_AUTHORIZED
 
@@ -1952,6 +2045,7 @@ def add_event_stage(
 
     if result == Status.SUCCESS:
         conn.commit()
+        notify_event(event_id, "stages-update")
     else:
         conn.rollback()
 
@@ -1963,7 +2057,6 @@ def remove_event_stage(
     request: Request,
     event_id: int,
     stage_id: int,
-    event_version: int = Query(...)
 ):
     conn = request.state.conn
 
@@ -1982,8 +2075,6 @@ def remove_event_stage(
         result = Status.OLYMPIAD_RENAMED
     if result == Status.SUCCESS and not check_entity_exist(request, "events", event_id):
         result = Status.ENTITY_NOT_FOUND
-    if result == Status.SUCCESS and not check_event_version(request, event_id, event_version):
-        result = Status.EVENT_VERSION_OUTDATED
     if result == Status.SUCCESS and not check_user_authorized(request, olympiad_id):
         result = Status.NOT_AUTHORIZED
 
@@ -2022,6 +2113,7 @@ def remove_event_stage(
 
     if result == Status.SUCCESS:
         conn.commit()
+        notify_event(event_id, "stages-update")
     else:
         conn.rollback()
 
@@ -2048,7 +2140,7 @@ def _render_stages_section_html(conn, event_id: int):
     ).fetchall()
 
     return render_fragment("stages_setup_section",
-        event={"id": event_id, "version": event_version}, stage_kinds=stage_kinds, stages=stages)
+        event_id=event_id, event_version=event_version, stage_kinds=stage_kinds, stages=stages)
 
 
 def _render_event_players_section_html(conn, event_id, olympiad_id):
@@ -2080,7 +2172,7 @@ def _render_event_players_section_html(conn, event_id, olympiad_id):
     available_participants = [p for p in all_participants if p["id"] not in enrolled_ids]
 
     return render_fragment("event_player_container",
-        event={"id": event_id},
+        event_id=event_id,
         enrolled_participants=enrolled_participants,
         available_participants=available_participants,
     )
@@ -2144,6 +2236,7 @@ def enroll_participant(request: Request, event_id: int, participant_id: int):
 
     if result == Status.SUCCESS:
         conn.commit()
+        notify_event(event_id, "enrollment-update")
     else:
         conn.rollback()
 
@@ -2210,6 +2303,7 @@ def unenroll_participant(request: Request, event_id: int, participant_id: int):
 
     if result == Status.SUCCESS:
         conn.commit()
+        notify_event(event_id, "enrollment-update")
     else:
         conn.rollback()
 
