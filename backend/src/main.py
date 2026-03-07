@@ -346,6 +346,7 @@ def serve_css():
 
 @app.get("/api/olympiads")
 def list_olympiads(request: Request):
+    # Can I guarantee that every time this function runs the olympiad badge has already been cleared
     conn = request.state.conn
 
     olympiad_badge_ctx = get_olympiad_from_request(request)
@@ -385,7 +386,6 @@ def list_olympiads(request: Request):
     response.headers.update(extra_headers)
 
     return response
-
 
 
 @app.get("/api/olympiads/create")
@@ -853,6 +853,9 @@ def delete_olympiad(request: Request, olympiad_id: int, olympiad_name: str = Que
         extra_headers["HX-Reswap"] = "innerHTML"
         html_content = templates.get_template("pin_modal.html").render(olympiad_id=olympiad_id)
     else:
+        event_ids = conn.execute(
+            "SELECT id FROM events WHERE olympiad_id = ?", (olympiad_id,)
+        ).fetchall()
         conn.execute(
             "DELETE FROM olympiads WHERE id = ? AND name = ? RETURNING id",
             (olympiad_id, olympiad_name)
@@ -865,9 +868,11 @@ def delete_olympiad(request: Request, olympiad_id: int, olympiad_name: str = Que
 
     if result == Status.SUCCESS:
         conn.commit()
+        for row in event_ids:
+            notify_event(row["id"], f"olympiad-deleted-{olympiad_id}")
     else:
         conn.rollback()
-    
+
     return response
 
 
@@ -1059,7 +1064,8 @@ def create_event(request: Request, name: str = Form(...)):
         ).fetchone()
         html_content = render_fragment("event_page",
             event_id=event["id"], event_name=event["name"],
-            event_version=event["version"], event_status="registration")
+            event_version=event["version"], event_status="registration",
+            olympiad_id=olympiad_id)
 
     html_content += _oob_badge_html(request, olympiad_id)
     response = HTMLResponse(html_content)
@@ -1183,9 +1189,14 @@ def _delete_entity(request: Request, entities: str, entity_id: int, entity_name:
     html_content += _oob_badge_html(request, olympiad_id)
     response = HTMLResponse(html_content)
     response.headers.update(extra_headers)
-    
+
     if result == Status.SUCCESS:
         conn.commit()
+        if entities == "events":
+            notify_event(entity_id, "event-deleted")
+            for queue in list(_event_subscribers.get(entity_id, [])):
+                queue.put_nowait(None)
+            _event_subscribers.pop(entity_id, None)
     else:
         conn.rollback()
     
@@ -1264,7 +1275,7 @@ def select_event(
         html_content = render_fragment("event_page",
             event_id=event["id"], event_name=event["name"],
             event_version=event["version"], event_status=event_status,
-            **extra_ctx)
+            olympiad_id=olympiad_id, **extra_ctx)
 
     html_content += _oob_badge_html(request, olympiad_id)
     response = HTMLResponse(html_content)
@@ -1404,7 +1415,7 @@ def _set_event_stage_order(request: Request, event_id: int, new_stage_order: int
         html_content = render_fragment("event_page",
             event_id=event["id"], event_name=event["name"],
             event_version=event["version"], event_status=event_status,
-            **extra_ctx)
+            olympiad_id=olympiad_id, **extra_ctx)
 
     html_content += _oob_badge_html(request, olympiad_id)
     response = HTMLResponse(html_content)
@@ -1818,14 +1829,25 @@ def get_stages_section(request: Request, event_id: int):
     return HTMLResponse(_render_stages_section_html(conn, event_id))
 
 
-# What happens if an admin delete the event the user is looking?
-# Right now for every endpoint that does stuff on the event I need
-# to check that the event has not been deleted
-# What I would like is to have all the user be informed that the olympiad has been deleted through a
-# modal that appears so that the user can then click an "Update Application" button and come to the
-# starting page
+@app.get("/api/events/{event_id}/deleted-notice")
+def get_event_deleted_notice(request: Request, event_id: int):
+    return templates.TemplateResponse(request, "event_deleted_modal.html", {})
+
+
+@app.get("/api/events/{event_id}/olympiad-deleted-notice")
+def get_event_olympiad_deleted_notice(request: Request, event_id: int):
+    html_content = templates.get_template("olympiad_deleted_modal.html").render()
+    html_content += templates.get_template("olympiad_badge.html").render(olympiad=sentinel_olympiad_badge, oob=True)
+    response = HTMLResponse(html_content)
+    return response
+
+
 @app.get("/api/events/{event_id}/sse")
 async def event_sse(request: Request, event_id: int):
+    conn = request.state.conn
+    # if not conn.execute("SELECT 1 FROM events WHERE id = ?", (event_id,)).fetchone():
+    #     return Response(status_code=404)
+
     queue: asyncio.Queue = asyncio.Queue()
     _event_subscribers[event_id].add(queue)
 

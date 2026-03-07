@@ -1,13 +1,14 @@
 <div id="modal" _="on closeModal from body remove me">
     <div class="modal-underlay" _="on htmx:afterRequest trigger closeModal on body"></div>
     <div class="modal-content" _="on click halt the event's bubbling">
-        <p>L'evento su cui stavi lavorando o che hai selezionato è stato eliminato da qualche admin</p>
+        <p>Questo evento è stato eliminato da un altro admin.</p>
         <div class="modal-actions">
             <button hx-get="/api/events"
-                hx-target="#main-content"
-                _="on htmx:afterRequest trigger closeModal on body">
-                Aggiorna la lista degli eventi
+                    hx-target="#main-content"
+                    _="on htmx:afterRequest trigger closeModal on body">
+                Torna agli eventi
             </button>
         </div>
     </div>
 </div>
+<div id="event-page" hx-swap-oob="outerHTML:#event-page"></div>
