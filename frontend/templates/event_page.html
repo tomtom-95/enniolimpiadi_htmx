@@ -275,7 +275,21 @@
                     </div>
                 {% endblock %} {# event_player_container #}
 
-            {% else %} {# event_status != "registration" — event is started or finished #}
+            {% elif event_status == "finished" %}
+
+                <div class="event-finished-page">
+                    <div class="event-finished-icon">🏆</div>
+                    <h3 class="event-finished-title">Evento concluso</h3>
+                    <p class="event-finished-subtitle">Le statistiche del torneo saranno disponibili qui.</p>
+                    <div class="event-finished-placeholder">
+                        <div class="event-finished-placeholder-row"></div>
+                        <div class="event-finished-placeholder-row short"></div>
+                        <div class="event-finished-placeholder-row"></div>
+                        <div class="event-finished-placeholder-row short"></div>
+                    </div>
+                </div>
+
+            {% else %} {# started #}
 
                 {#
                     ............................................................
@@ -460,6 +474,28 @@
                                                         {% endfor %} {# for match #}
                                                     {% endfor %} {# for round #}
                                                 </div>
+                                                {% if stage.third_place_match %}
+                                                    {% set match = stage.third_place_match %}
+                                                    <div class="third-place-section">
+                                                        <div class="third-place-label">Finale 3° Posto</div>
+                                                        {% if match.clickable %}
+                                                            <div class="bracket-match clickable third-place-match"
+                                                                 hx-get="/api/events/{{ event_id }}/matches/{{ match.match_id }}/score/edit?p1_id={{ match.p1_id }}&p2_id={{ match.p2_id }}&score_kind={{ stage.score_kind }}"
+                                                                 hx-target="#modal-container"
+                                                                 hx-swap="innerHTML">
+                                                        {% else %}
+                                                            <div class="bracket-match third-place-match">
+                                                        {% endif %}
+                                                            <div class="bracket-participant bracket-top{% if match.winner_id and match.winner_id == match.p1_id %} bracket-winner{% endif %}">
+                                                                {{ match.p1 }}
+                                                            </div>
+                                                            <div class="bracket-score">{%- if match.has_score -%}{{ match.score }}{%- elif match.clickable -%}vs{%- endif -%}</div>
+                                                            <div class="bracket-participant bracket-bottom{% if match.winner_id and match.winner_id == match.p2_id %} bracket-winner{% endif %}">
+                                                                {{ match.p2 }}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                {% endif %}
                                             {% else %}
                                                 <p>Nessun incontro in questa fase.</p>
                                             {% endif %} {# rounds #}
@@ -490,14 +526,25 @@
                         hx-post="/api/events/{{ event_id }}/start"
                         hx-target="#event-page"
                         hx-swap="outerHTML transition:true"
-                        _="on click add .animating-event to <html/> remove .animating-stage from <html/> remove .animating-bracket from <html/>">Avvia evento</button>
-            {% else %}
+                        _="on click add .animating-event to <html/> remove .animating-stage from <html/> remove .animating-bracket from <html/>">Avvia →</button>
+            {% elif event_status == "started" %}
                 <button class="event-phase-btn phase-btn-back"
                         hx-post="/api/events/{{ event_id }}/back-to-registration"
                         hx-target="#event-page"
                         hx-swap="outerHTML transition:true"
-                        _="on click add .animating-event to <html/> remove .animating-stage from <html/> remove .animating-bracket from <html/>">← Torna alla registrazione</button>
-            {% endif %} {# event_status == "registration" #}
+                        _="on click add .animating-event to <html/> remove .animating-stage from <html/> remove .animating-bracket from <html/>">← Registrazione</button>
+                <button class="event-phase-btn phase-btn-finish"
+                        hx-post="/api/events/{{ event_id }}/finish"
+                        hx-target="#event-page"
+                        hx-swap="outerHTML transition:true"
+                        _="on click add .animating-event to <html/> remove .animating-stage from <html/> remove .animating-bracket from <html/>">Concludi →</button>
+            {% else %} {# finished #}
+                <button class="event-phase-btn phase-btn-back"
+                        hx-post="/api/events/{{ event_id }}/back-to-running"
+                        hx-target="#event-page"
+                        hx-swap="outerHTML transition:true"
+                        _="on click add .animating-event to <html/> remove .animating-stage from <html/> remove .animating-bracket from <html/>">← Torna in corso</button>
+            {% endif %}
         </div>
     </div>
 {% endblock %} {# event_page #}

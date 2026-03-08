@@ -839,6 +839,73 @@ body {
     border-color: #9995a8;
 }
 
+.event-phase-btn.phase-btn-finish {
+    background-color: #2d9c5e;
+    color: #fff;
+    border-color: #2d9c5e;
+}
+
+.event-phase-btn.phase-btn-finish:hover {
+    background-color: #228a52;
+    border-color: #228a52;
+}
+
+
+.event-finished-page {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    padding: 3rem 2rem;
+    text-align: center;
+    gap: 0.75rem;
+}
+
+.event-finished-icon {
+    font-size: 2.5rem;
+    line-height: 1;
+    margin-bottom: 0.25rem;
+}
+
+.event-finished-title {
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: #2d2a4a;
+    margin: 0;
+}
+
+.event-finished-subtitle {
+    font-size: 0.9rem;
+    color: #9995a8;
+    margin: 0;
+}
+
+.event-finished-placeholder {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    width: 100%;
+    max-width: 260px;
+    margin-top: 1.5rem;
+}
+
+.event-finished-placeholder-row {
+    height: 14px;
+    background: #e8e4df;
+    border-radius: 6px;
+    animation: placeholder-pulse 1.6s ease-in-out infinite;
+}
+
+.event-finished-placeholder-row.short {
+    width: 60%;
+    align-self: center;
+}
+
+@keyframes placeholder-pulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.45; }
+}
 
 .event-layout {
     display: flex;
@@ -1436,6 +1503,34 @@ html.slide-back::view-transition-new(bracket-slide) {
     color: #2d2a4a;
 }
 
+.third-place-section {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 1.5rem 2rem 2rem;
+    border-top: 1px solid #eee;
+    margin-top: 0.5rem;
+}
+
+.third-place-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #9995a8;
+    margin-bottom: 0.75rem;
+}
+
+.third-place-match {
+    min-width: 200px;
+    max-width: 200px;
+    border-left-color: #9995a8;
+}
+
+.third-place-match.clickable:hover {
+    border-left-color: #e85d4c;
+}
+
 /*
  * Event modal
  */
@@ -1664,6 +1759,7 @@ html.slide-back::view-transition-new(bracket-slide) {
 .stage-groups-setup {
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: 0.75rem;
     padding-top: 0.6rem;
     border-top: 1px solid #e8e3da;

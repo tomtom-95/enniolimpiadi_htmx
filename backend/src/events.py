@@ -148,6 +148,23 @@ def generate_single_elimination_stage(conn, stage_id: int):
                 (match_id, winner_next_match_id)
             )
 
+    # Create a third-place match when there are at least 2 rounds (semifinals exist).
+    # Losers of the semifinals feed into this match.
+    if num_rounds >= 2:
+        third_place_match_id = conn.execute(
+            "INSERT INTO matches (group_id) VALUES (?) RETURNING id",
+            (group_id,)
+        ).fetchone()["id"]
+        conn.execute(
+            "INSERT INTO bracket_matches (match_id, winner_next_match_id) VALUES (?, NULL)",
+            (third_place_match_id,)
+        )
+        for semifinal_match_id in rounds[-2]:
+            conn.execute(
+                "UPDATE bracket_matches SET loser_next_match_id = ? WHERE match_id = ?",
+                (third_place_match_id, semifinal_match_id)
+            )
+
     # Assign participants to first-round matches.
     # Seeds beyond n are byes (no participant inserted).
     first_round = rounds[0]
@@ -333,6 +350,38 @@ def advance_bracket_winner(conn, match_id, winner_id):
         )
 
 
+def advance_bracket_loser(conn, match_id, winner_id):
+    """Advance the loser of match_id to the loser_next_match_id (third-place match).
+
+    Removes any previously advanced participant from this match, then inserts the
+    new loser. If winner_id is None (draw/no result), clears without inserting.
+    """
+    bm = conn.execute(
+        "SELECT loser_next_match_id FROM bracket_matches WHERE match_id = ?", (match_id,)
+    ).fetchone()
+    if not bm or bm["loser_next_match_id"] is None:
+        return
+    loser_next_mid = bm["loser_next_match_id"]
+    all_pids = [r["participant_id"] for r in conn.execute(
+        "SELECT participant_id FROM match_participants WHERE match_id = ?", (match_id,)
+    ).fetchall()]
+    # Remove any participant from THIS match already in the third-place match,
+    # then clear its scores so they start fresh.
+    for pid in all_pids:
+        conn.execute(
+            "DELETE FROM match_participants WHERE match_id = ? AND participant_id = ?",
+            (loser_next_mid, pid)
+        )
+    conn.execute("DELETE FROM match_participant_scores WHERE match_id = ?", (loser_next_mid,))
+    if winner_id is not None:
+        loser_id = next((pid for pid in all_pids if pid != winner_id), None)
+        if loser_id is not None:
+            conn.execute(
+                "INSERT OR IGNORE INTO match_participants (match_id, participant_id) VALUES (?, ?)",
+                (loser_next_mid, loser_id)
+            )
+
+
 def present_single_elimination_stage(conn, stage_id, view_round=0):
     """Build a single-elimination stage dict from DB data.
 
@@ -348,7 +397,7 @@ def present_single_elimination_stage(conn, stage_id, view_round=0):
     score_kind = event_row["score_kind"] if event_row else "points"
 
     rows = conn.execute(
-        "SELECT m.id AS match_id, bm.winner_next_match_id "
+        "SELECT m.id AS match_id, bm.winner_next_match_id, bm.loser_next_match_id "
         "FROM groups g "
         "JOIN matches m ON m.group_id = g.id "
         "JOIN bracket_matches bm ON bm.match_id = m.id "
@@ -359,7 +408,7 @@ def present_single_elimination_stage(conn, stage_id, view_round=0):
     if not rows:
         return {"rounds": [], "id": stage_id, "score_kind": score_kind,
                 "view_round": 0, "total_rounds": 0, "has_prev": False, "has_next": False,
-                "total_rows": 0}
+                "total_rows": 0, "third_place_match": None}
 
     match_ids = [r["match_id"] for r in rows]
     placeholders = ",".join("?" * len(match_ids))
@@ -392,7 +441,16 @@ def present_single_elimination_stage(conn, stage_id, view_round=0):
 
     feeders = defaultdict(list)
     matches_by_id = {}
+    # Identify the third-place match: it's the loser_next_match_id target of semifinals.
+    third_place_id = None
     for r in rows:
+        if r["loser_next_match_id"] is not None:
+            third_place_id = r["loser_next_match_id"]
+            break
+
+    for r in rows:
+        if r["match_id"] == third_place_id:
+            continue  # exclude third-place match from the main bracket BFS
         matches_by_id[r["match_id"]] = r
         if r["winner_next_match_id"] is not None:
             feeders[r["winner_next_match_id"]].append(r["match_id"])
@@ -465,6 +523,34 @@ def present_single_elimination_stage(conn, stage_id, view_round=0):
     n_first = len(sliced[0]["matches"]) if sliced else 0
     total_rows = n_first * 2
 
+    # Build the third-place match dict; show it only on the last window (no next).
+    third_place_match = None
+    is_last_window = view_round >= max_view
+    if third_place_id is not None and is_last_window:
+        parts = match_parts.get(third_place_id, [])
+        p1_id   = parts[0][0] if len(parts) > 0 else None
+        p2_id   = parts[1][0] if len(parts) > 1 else None
+        p1_name = parts[0][1] if len(parts) > 0 else "?"
+        p2_name = parts[1][1] if len(parts) > 1 else "?"
+        s1 = score_map.get((third_place_id, p1_id)) if p1_id else None
+        s2 = score_map.get((third_place_id, p2_id)) if p2_id else None
+        has_score = s1 is not None and s2 is not None
+        clickable = len(parts) == 2
+        tp_winner_id = None
+        if has_score and clickable:
+            tp_winner_id = determine_bracket_winner(p1_id, s1, p2_id, s2, score_kind)
+        third_place_match = {
+            "match_id":  third_place_id,
+            "p1":        p1_name,
+            "p2":        p2_name,
+            "p1_id":     p1_id,
+            "p2_id":     p2_id,
+            "score":     f"{s1} - {s2}" if has_score else None,
+            "has_score": has_score,
+            "clickable": clickable,
+            "winner_id": tp_winner_id,
+        }
+
     return {
         "rounds": sliced,
         "id": stage_id,
@@ -474,4 +560,5 @@ def present_single_elimination_stage(conn, stage_id, view_round=0):
         "has_prev": view_round > 0,
         "has_next": view_round < max_view,
         "total_rows": total_rows,
+        "third_place_match": third_place_match,
     }

@@ -651,6 +651,7 @@ async def update_match_score(
         if stage_kind == "single_elimination":
             winner_id = events.determine_bracket_winner(p1_id, p1_score, p2_id, p2_score, score_kind)
             events.advance_bracket_winner(conn, match_id, winner_id)
+            events.advance_bracket_loser(conn, match_id, winner_id)
 
         new_event_version = conn.execute(
             "UPDATE events SET version = version + 1 WHERE id = ? RETURNING version",
@@ -1237,6 +1238,8 @@ def select_event(request: Request, event_id: int, event_name: str = Query(None, 
         extra_ctx = {}
         if event_status == "registration":
             extra_ctx = _get_registration_ctx(conn, event_id, olympiad_id, event["score_kind"])
+        elif event_status == "finished":
+            extra_ctx = _get_stage_ctx(conn, event_id, max_stage_order)
         else:
             extra_ctx = _get_stage_ctx(conn, event_id, event["current_stage_order"])
 
@@ -1370,6 +1373,8 @@ def _set_event_stage_order(request: Request, event_id: int, new_stage_order: int
         extra_ctx = {}
         if event_status == "registration":
             extra_ctx = _get_registration_ctx(conn, event_id, olympiad_id, event["score_kind"])
+        elif event_status == "finished":
+            extra_ctx = _get_stage_ctx(conn, event_id, max_stage_order)
         else:
             extra_ctx = _get_stage_ctx(conn, event_id, new_stage_order)
 
@@ -1403,6 +1408,28 @@ def start_event(request: Request, event_id: int):
 @app.post("/api/events/{event_id}/back-to-registration")
 def back_to_registration(request: Request, event_id: int):
     return _set_event_stage_order(request, event_id, 0)
+
+
+@app.post("/api/events/{event_id}/finish")
+def finish_event(request: Request, event_id: int):
+    conn = request.state.conn
+    max_stage = conn.execute(
+        "SELECT MAX(stage_order) AS max_order FROM event_stages WHERE event_id = ?",
+        (event_id,)
+    ).fetchone()
+    max_stage_order = max_stage["max_order"] if max_stage and max_stage["max_order"] else 1
+    return _set_event_stage_order(request, event_id, max_stage_order + 1)
+
+
+@app.post("/api/events/{event_id}/back-to-running")
+def back_to_running(request: Request, event_id: int):
+    conn = request.state.conn
+    max_stage = conn.execute(
+        "SELECT MAX(stage_order) AS max_order FROM event_stages WHERE event_id = ?",
+        (event_id,)
+    ).fetchone()
+    max_stage_order = max_stage["max_order"] if max_stage and max_stage["max_order"] else 1
+    return _set_event_stage_order(request, event_id, max_stage_order)
 
 
 @app.get("/api/events/{event_id}/players")
