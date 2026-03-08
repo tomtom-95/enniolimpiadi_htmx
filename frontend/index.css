@@ -963,7 +963,24 @@ body {
     min-height: 0;
     display: flex;
     flex-direction: column;
+}
+
+html.animating-stage #stage-content {
     view-transition-name: stage-slide;
+}
+
+html.animating-bracket #stage-bracket-inner {
+    view-transition-name: bracket-slide;
+}
+
+html.animating-event #event-page {
+    view-transition-name: event-slide;
+}
+
+/* Disable the default root cross-fade so unrelated elements never animate */
+::view-transition-old(root),
+::view-transition-new(root) {
+    animation: none;
 }
 
 @keyframes fade-in {
@@ -1010,6 +1027,14 @@ html.slide-back::view-transition-old(stage-slide) {
 html.slide-back::view-transition-new(stage-slide) {
     animation: 420ms cubic-bezier(0, 0, 0.2, 1) 45ms both fade-in,
                600ms cubic-bezier(0.4, 0, 0.2, 1) both slide-from-left;
+}
+
+::view-transition-old(event-slide) {
+    animation: 180ms cubic-bezier(0.4, 0, 1, 1) both fade-out;
+}
+
+::view-transition-new(event-slide) {
+    animation: 420ms cubic-bezier(0, 0, 0.2, 1) 45ms both fade-in;
 }
 
 .stage-body {
@@ -1313,10 +1338,6 @@ html.slide-back::view-transition-new(stage-slide) {
  * where r = round index, m = match index (both 0-based),
  * +1 because row 1 is reserved for headers.
  */
-#stage-bracket-inner {
-    view-transition-name: bracket-slide;
-}
-
 ::view-transition-old(bracket-slide) {
     animation: 180ms cubic-bezier(0.4, 0, 1, 1) both fade-out,
                600ms cubic-bezier(0.4, 0, 0.2, 1) both slide-to-left;
