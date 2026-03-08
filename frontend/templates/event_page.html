@@ -18,16 +18,26 @@
          hx-target="#event-page"
          hx-swap="outerHTML">
         <span hidden
+              hx-trigger="sse:olympiad-deleted-{{ olympiad_id }}"
+              hx-get="/api/events/{{ event_id }}/olympiad-deleted-notice"
+              hx-target="#modal-container"
+              hx-swap="innerHTML"></span>
+        <span hidden
+              hx-trigger="sse:olympiad-renamed-{{ olympiad_id }}"
+              hx-get="/api/events/{{ event_id }}/olympiad-renamed-notice"
+              hx-target="#modal-container"
+              hx-swap="innerHTML"></span>
+        <span hidden
               hx-trigger="sse:event-deleted"
               hx-get="/api/events/{{ event_id }}/deleted-notice"
               hx-target="#modal-container"
               hx-swap="innerHTML"></span>
         <span hidden
-              hx-trigger="sse:olympiad-deleted-{{ olympiad_id }}"
-              hx-get="/api/events/{{ event_id }}/olympiad-deleted-notice"
-              hx-target="#modal-container"
-              hx-swap="innerHTML"></span>
-        <h2 class="event-title">{{ event_name }}</h2>
+              hx-trigger="sse:event-renamed"
+              hx-get="/api/events/{{ event_id }}/title"
+              hx-target="#event-title"
+              hx-swap="outerHTML"></span>
+        <h2 id="event-title" class="event-title">{{ event_name }}</h2>
 
         {#
             ------------------------------------------------------------
@@ -190,7 +200,6 @@
                                         <button id="btn-add-stage"
                                                 class="btn-add-stage"
                                                 hx-post="/api/events/{{ event_id }}/stages"
-                                                hx-vals='{"kind": "{{ stage_kinds[0].kind }}"}'
                                                 hx-target="#stages-setup-section"
                                                 hx-swap="outerHTML">+ Aggiungi fase</button>
                                     </div>

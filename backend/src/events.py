@@ -23,6 +23,8 @@ def generate_groups_stage(conn, stage_id: int, num_groups: int):
     # Teardown: CASCADE handles group_participants, matches, match_participants, scores
     conn.execute("DELETE FROM groups WHERE event_stage_id = ?", (stage_id,))
 
+    # TODO: right now in the frontend is a bit confusing that if there are no players enrolled
+    #       nothing happens when I try to +1 the number of groups
     if n < 2:
         return
 

@@ -288,11 +288,6 @@ body {
                 margin-bottom 200ms ease-out, padding 200ms ease-out;
 }
 
-.entity-element:hover {
-    background-color: #f5f0e6;
-    border-color: #e85d4c;
-}
-
 .entity-element.removing {
     max-height: 0;
     opacity: 0;
