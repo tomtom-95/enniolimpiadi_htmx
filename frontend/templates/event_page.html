@@ -418,7 +418,7 @@
                                                                 hx-get="/api/events/{{ event_id }}/stages/{{ stage.id }}/bracket-content?view_round={{ stage.view_round + 1 }}"
                                                                 hx-target="#stage-bracket-inner"
                                                                 hx-swap="outerHTML transition:true"
-                                                                _="on click add .animating-stage to <html/> remove .animating-bracket from <html/> remove .slide-back from <html/>">&#8594;</button>
+                                                                _="on click add .animating-bracket to <html/> remove .animating-stage from <html/> remove .slide-back from <html/>">&#8594;</button>
                                                     {% else %}
                                                         <span class="bracket-nav-btn bracket-nav-disabled"></span>
                                                     {% endif %}
