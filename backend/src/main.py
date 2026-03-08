@@ -221,12 +221,15 @@ def check_olympiad_name_duplication(request: Request, olympiad_id: int, name: st
     return result
 
 
-def check_entity_name_duplication(request: Request, entities: str, entity_id: int, entity_name: str):
+def check_entity_name_duplication(
+    request: Request, olympiad_id: int, entities: str, entity_id: int, entity_name: str
+):
     result = request.state.conn.execute(
         f"""
-        SELECT 1 FROM {entities} WHERE id != ? AND name = ?
+        SELECT 1 FROM {entities}
+        WHERE olympiad_id = ? AND id != ? AND name = ?
         """,
-        (entity_id, entity_name)
+        (olympiad_id, entity_id, entity_name)
     ).fetchone()
     return result
 
@@ -900,7 +903,7 @@ def create_player(request: Request, name: str = Form(...)):
         result = Status.OLYMPIAD_NOT_FOUND
     if result == Status.SUCCESS and not check_olympiad_name(request, olympiad_id, olympiad_name):
         result = Status.OLYMPIAD_RENAMED
-    if result == Status.SUCCESS and check_entity_name_duplication(request, "players", 0, name):
+    if result == Status.SUCCESS and check_entity_name_duplication(request, olympiad_id, "players", 0, name):
         result = Status.NAME_DUPLICATION
     if result == Status.SUCCESS and not check_user_authorized(request, olympiad_id):
         result = Status.NOT_AUTHORIZED
@@ -951,7 +954,7 @@ def create_team(request: Request, name: str = Form(...)):
         result = Status.OLYMPIAD_NOT_FOUND
     if result == Status.SUCCESS and not check_olympiad_name(request, olympiad_id, olympiad_name):
         result = Status.OLYMPIAD_RENAMED
-    if result == Status.SUCCESS and check_entity_name_duplication(request, "teams", 0, name):
+    if result == Status.SUCCESS and check_entity_name_duplication(request, olympiad_id, "teams", 0, name):
         result = Status.NAME_DUPLICATION
     if result == Status.SUCCESS and not check_user_authorized(request, olympiad_id):
         result = Status.NOT_AUTHORIZED
@@ -1003,7 +1006,7 @@ def create_event(request: Request, name: str = Form(...)):
         result = Status.OLYMPIAD_NOT_FOUND
     if result == Status.SUCCESS and not check_olympiad_name(request, olympiad_id, olympiad_name):
         result = Status.OLYMPIAD_RENAMED
-    if result == Status.SUCCESS and check_entity_name_duplication(request, "events", 0, name):
+    if result == Status.SUCCESS and check_entity_name_duplication(request, olympiad_id, "events", 0, name):
         result = Status.NAME_DUPLICATION
     if result == Status.SUCCESS and not check_user_authorized(request, olympiad_id):
         result = Status.NOT_AUTHORIZED
@@ -1060,7 +1063,7 @@ def _rename_entity(request: Request, entities: str, entity_id: int, entity_curr_
         result = Status.ENTITY_NOT_FOUND
     if result == Status.SUCCESS and not check_entity_name(request, entities, entity_id, entity_curr_name):
         result = Status.ENTITY_RENAMED
-    if result == Status.SUCCESS and check_entity_name_duplication(request, entities, 0, entity_new_name):
+    if result == Status.SUCCESS and check_entity_name_duplication(request, olympiad_id, entities, 0, entity_new_name):
         result = Status.NAME_DUPLICATION
     if result == Status.SUCCESS and not check_user_authorized(request, olympiad_id):
         result = Status.NOT_AUTHORIZED
