@@ -692,9 +692,9 @@ async def update_match_score(
 
 
 @app.get("/api/events/{event_id}/stages/{stage_id}/bracket-content")
-def get_bracket_content(request: Request, event_id: int, stage_id: int):
+def get_bracket_content(request: Request, event_id: int, stage_id: int, view_round: int = Query(0)):
     conn = request.state.conn
-    stage = events.present_single_elimination_stage(conn, stage_id)
+    stage = events.present_single_elimination_stage(conn, stage_id, view_round=view_round)
     event_version = conn.execute("SELECT version FROM events WHERE id = ?", (event_id,)).fetchone()["version"]
     return HTMLResponse(render_event_fragment("stage_bracket_inner", stage=stage, event_id=event_id, event_version=event_version))
 
@@ -1485,7 +1485,7 @@ def get_event_stage(request: Request, event_id: int, stage_order: int):
         elif stage_kind == "round_robin":
             html_content = "<div class='error-banner'>Fase non trovata</div>"
         elif stage_kind == "single_elimination":
-            stage = events.present_single_elimination_stage(conn, stage_id)
+            stage = events.present_single_elimination_stage(conn, stage_id, view_round=0)
 
         if stage_kind != "round_robin":
             stage["name"] = stage_label

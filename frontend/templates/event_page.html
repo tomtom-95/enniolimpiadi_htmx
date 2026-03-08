@@ -397,33 +397,56 @@
                                     {% block stage_bracket_inner %}
                                         <div id="stage-bracket-inner"
                                              hx-trigger="sse:score-update"
-                                             hx-get="/api/events/{{ event_id }}/stages/{{ stage.id }}/bracket-content"
+                                             hx-get="/api/events/{{ event_id }}/stages/{{ stage.id }}/bracket-content?view_round={{ stage.view_round }}"
                                              hx-target="this"
                                              hx-swap="outerHTML">
                                             {% set rounds = stage.rounds %}
                                             {% if rounds %}
-                                                {% set first_round_matches = rounds[0].matches | length %}
-                                                {% set total_rows = first_round_matches * 2 %}
-                                                {% set num_rounds = rounds | length %}
+                                                <div class="bracket-nav">
+                                                    {% if stage.has_prev %}
+                                                        <button class="bracket-nav-btn"
+                                                                hx-get="/api/events/{{ event_id }}/stages/{{ stage.id }}/bracket-content?view_round={{ stage.view_round - 1 }}"
+                                                                hx-target="#stage-bracket-inner"
+                                                                hx-swap="outerHTML transition:true"
+                                                                _="on click add .slide-back to <html/>">&#8592;</button>
+                                                    {% else %}
+                                                        <span class="bracket-nav-btn bracket-nav-disabled"></span>
+                                                    {% endif %}
+                                                    <span class="bracket-nav-label">{{ stage.view_round + 1 }} / {{ stage.total_rounds }}</span>
+                                                    {% if stage.has_next %}
+                                                        <button class="bracket-nav-btn"
+                                                                hx-get="/api/events/{{ event_id }}/stages/{{ stage.id }}/bracket-content?view_round={{ stage.view_round + 1 }}"
+                                                                hx-target="#stage-bracket-inner"
+                                                                hx-swap="outerHTML transition:true"
+                                                                _="on click remove .slide-back from <html/>">&#8594;</button>
+                                                    {% else %}
+                                                        <span class="bracket-nav-btn bracket-nav-disabled"></span>
+                                                    {% endif %}
+                                                </div>
                                                 <div class="stage-bracket"
-                                                     style="grid-template-columns: repeat({{ num_rounds }}, 150px);
-                                                            grid-template-rows: repeat({{ total_rows }}, 1fr)">
+                                                     style="grid-template-columns: repeat({{ rounds | length }}, 1fr);
+                                                            grid-template-rows: repeat({{ stage.total_rows }}, 1fr)">
                                                     {% for round in rounds %}
-                                                        {% set r = loop.index0 %}
+                                                        {% set col = loop.index %}
                                                         {% for match in round.matches %}
                                                             {% set m = loop.index0 %}
-                                                            {% set row_start = m * (2 ** (r + 1)) + (2 ** r) %}
+                                                            {# col 1 (parent): cards stacked, each 2 rows. col 2 (child): centred between its two parents. #}
+                                                            {% if col == 1 %}
+                                                                {% set row_start = m * 2 + 1 %}
+                                                            {% else %}
+                                                                {% set row_start = m * 4 + 2 %}
+                                                            {% endif %}
                                                             {# Clickable matches (both players known) open the score modal #}
                                                             {% if match.clickable %}
                                                                 <div class="bracket-match clickable"
-                                                                     style="grid-column: {{ r + 1 }};
+                                                                     style="grid-column: {{ col }};
                                                                             grid-row: {{ row_start }} / span 2"
                                                                      hx-get="/api/events/{{ event_id }}/matches/{{ match.match_id }}/score/edit?p1_id={{ match.p1_id }}&p2_id={{ match.p2_id }}&score_kind={{ stage.score_kind }}"
                                                                      hx-target="#modal-container"
                                                                      hx-swap="innerHTML">
                                                             {% else %}
                                                                 <div class="bracket-match"
-                                                                     style="grid-column: {{ r + 1 }};
+                                                                     style="grid-column: {{ col }};
                                                                             grid-row: {{ row_start }} / span 2">
                                                             {% endif %} {# match.clickable #}
                                                                 <div class="bracket-participant bracket-top{% if match.winner_id and match.winner_id == match.p1_id %} bracket-winner{% endif %}">

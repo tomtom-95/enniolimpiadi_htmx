@@ -1313,12 +1313,66 @@ html.slide-back::view-transition-new(stage-slide) {
  * where r = round index, m = match index (both 0-based),
  * +1 because row 1 is reserved for headers.
  */
+#stage-bracket-inner {
+    view-transition-name: bracket-slide;
+}
+
+::view-transition-old(bracket-slide) {
+    animation: 180ms cubic-bezier(0.4, 0, 1, 1) both fade-out,
+               600ms cubic-bezier(0.4, 0, 0.2, 1) both slide-to-left;
+}
+
+::view-transition-new(bracket-slide) {
+    animation: 420ms cubic-bezier(0, 0, 0.2, 1) 45ms both fade-in,
+               600ms cubic-bezier(0.4, 0, 0.2, 1) both slide-from-right;
+}
+
+html.slide-back::view-transition-old(bracket-slide) {
+    animation: 180ms cubic-bezier(0.4, 0, 1, 1) both fade-out,
+               600ms cubic-bezier(0.4, 0, 0.2, 1) both slide-to-right;
+}
+
+html.slide-back::view-transition-new(bracket-slide) {
+    animation: 420ms cubic-bezier(0, 0, 0.2, 1) 45ms both fade-in,
+               600ms cubic-bezier(0.4, 0, 0.2, 1) both slide-from-left;
+}
+
+.bracket-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 1rem;
+}
+
+.bracket-nav-btn {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    padding: 0.25rem 0.75rem;
+    color: #2d2a4a;
+    min-width: 2.5rem;
+}
+
+.bracket-nav-btn:hover {
+    color: #e85d4c;
+}
+
+.bracket-nav-disabled {
+    min-width: 2.5rem;
+    display: inline-block;
+}
+
+.bracket-nav-label {
+    font-size: 0.85rem;
+    color: #9995a8;
+}
+
 .stage-bracket {
     display: grid;
     column-gap: 3rem;
     row-gap: 1.5rem;
-    overflow-x: auto;
-    padding: 2rem;
+    padding: 0 2rem 2rem;
 }
 
 .bracket-match {

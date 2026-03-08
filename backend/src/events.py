@@ -333,8 +333,12 @@ def advance_bracket_winner(conn, match_id, winner_id):
         )
 
 
-def present_single_elimination_stage(conn, stage_id):
-    """Build a single-elimination stage dict from DB data."""
+def present_single_elimination_stage(conn, stage_id, view_round=0):
+    """Build a single-elimination stage dict from DB data.
+
+    Returns two consecutive rounds (a parent and its child) for the given
+    view_round index, along with navigation metadata.
+    """
 
     event_row = conn.execute(
         "SELECT e.score_kind FROM event_stages es "
@@ -353,7 +357,9 @@ def present_single_elimination_stage(conn, stage_id):
     ).fetchall()
 
     if not rows:
-        return {"rounds": [], "id": stage_id, "score_kind": score_kind}
+        return {"rounds": [], "id": stage_id, "score_kind": score_kind,
+                "view_round": 0, "total_rounds": 0, "has_prev": False, "has_next": False,
+                "total_rows": 0}
 
     match_ids = [r["match_id"] for r in rows]
     placeholders = ",".join("?" * len(match_ids))
@@ -442,4 +448,30 @@ def present_single_elimination_stage(conn, stage_id):
 
         rounds_list.append({"matches": match_dicts})
 
-    return {"rounds": rounds_list, "id": stage_id, "score_kind": score_kind}
+    total_rounds = len(rounds_list)
+
+    # Clamp view_round so it always shows 2 rounds when possible
+    max_view = max(0, total_rounds - 2)
+    view_round = max(0, min(view_round, max_view))
+
+    # Slice: 2 rounds for the current window (1 if only 1 round exists)
+    window_end = min(view_round + 2, total_rounds)
+    sliced = rounds_list[view_round:window_end]
+    for i, round_data in enumerate(sliced):
+        round_data["abs_round"] = view_round + i
+
+    # total_rows: parent cards stacked directly, each taking 2 rows.
+    # Child cards slot between their two parents with no extra spacing.
+    n_first = len(sliced[0]["matches"]) if sliced else 0
+    total_rows = n_first * 2
+
+    return {
+        "rounds": sliced,
+        "id": stage_id,
+        "score_kind": score_kind,
+        "view_round": view_round,
+        "total_rounds": total_rounds,
+        "has_prev": view_round > 0,
+        "has_next": view_round < max_view,
+        "total_rows": total_rows,
+    }
