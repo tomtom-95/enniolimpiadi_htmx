@@ -969,7 +969,7 @@ html.animating-stage #stage-content {
     view-transition-name: stage-slide;
 }
 
-html.animating-bracket #stage-bracket-inner {
+html.animating-bracket .stage-body {
     view-transition-name: bracket-slide;
 }
 
