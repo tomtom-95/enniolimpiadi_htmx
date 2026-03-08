@@ -136,16 +136,16 @@ def generate_single_elimination_stage(conn, stage_id: int):
         rounds.append(round_matches)
 
     # Link bracket_matches: each match points to its parent in the next round.
-    # Final match has next_match_id = NULL.
+    # Final match has winner_next_match_id = NULL (no next match).
     for round_idx, round_matches in enumerate(rounds):
         for i, match_id in enumerate(round_matches):
             if round_idx == len(rounds) - 1:
-                next_match_id = None
+                winner_next_match_id = None
             else:
-                next_match_id = rounds[round_idx + 1][i // 2]
+                winner_next_match_id = rounds[round_idx + 1][i // 2]
             conn.execute(
-                "INSERT INTO bracket_matches (match_id, next_match_id) VALUES (?, ?)",
-                (match_id, next_match_id)
+                "INSERT INTO bracket_matches (match_id, winner_next_match_id) VALUES (?, ?)",
+                (match_id, winner_next_match_id)
             )
 
     # Assign participants to first-round matches.
@@ -172,12 +172,12 @@ def generate_single_elimination_stage(conn, stage_id: int):
         ).fetchall()
         if len(pids) == 1:
             bm = conn.execute(
-                "SELECT next_match_id FROM bracket_matches WHERE match_id = ?", (match_id,)
+                "SELECT winner_next_match_id FROM bracket_matches WHERE match_id = ?", (match_id,)
             ).fetchone()
-            if bm and bm["next_match_id"]:
+            if bm and bm["winner_next_match_id"]:
                 conn.execute(
                     "INSERT OR IGNORE INTO match_participants (match_id, participant_id) VALUES (?, ?)",
-                    (bm["next_match_id"], pids[0]["participant_id"])
+                    (bm["winner_next_match_id"], pids[0]["participant_id"])
                 )
 
 
@@ -289,11 +289,11 @@ def _cascade_clear_bracket(conn, match_id, pids):
     if not pids:
         return
     bm = conn.execute(
-        "SELECT next_match_id FROM bracket_matches WHERE match_id = ?", (match_id,)
+        "SELECT winner_next_match_id FROM bracket_matches WHERE match_id = ?", (match_id,)
     ).fetchone()
-    if not bm or bm["next_match_id"] is None:
+    if not bm or bm["winner_next_match_id"] is None:
         return
-    next_mid = bm["next_match_id"]
+    next_mid = bm["winner_next_match_id"]
     ph = ",".join("?" * len(pids))
     found = {r["participant_id"] for r in conn.execute(
         f"SELECT participant_id FROM match_participants "
@@ -317,11 +317,11 @@ def advance_bracket_winner(conn, match_id, winner_id):
     If winner_id is None (draw/tie), clears old advancement without inserting anyone.
     """
     bm = conn.execute(
-        "SELECT next_match_id FROM bracket_matches WHERE match_id = ?", (match_id,)
+        "SELECT winner_next_match_id FROM bracket_matches WHERE match_id = ?", (match_id,)
     ).fetchone()
-    if not bm or bm["next_match_id"] is None:
+    if not bm or bm["winner_next_match_id"] is None:
         return
-    next_mid = bm["next_match_id"]
+    next_mid = bm["winner_next_match_id"]
     pids = {r["participant_id"] for r in conn.execute(
         "SELECT participant_id FROM match_participants WHERE match_id = ?", (match_id,)
     ).fetchall()}
@@ -344,7 +344,7 @@ def present_single_elimination_stage(conn, stage_id):
     score_kind = event_row["score_kind"] if event_row else "points"
 
     rows = conn.execute(
-        "SELECT m.id AS match_id, bm.next_match_id "
+        "SELECT m.id AS match_id, bm.winner_next_match_id "
         "FROM groups g "
         "JOIN matches m ON m.group_id = g.id "
         "JOIN bracket_matches bm ON bm.match_id = m.id "
@@ -388,12 +388,12 @@ def present_single_elimination_stage(conn, stage_id):
     matches_by_id = {}
     for r in rows:
         matches_by_id[r["match_id"]] = r
-        if r["next_match_id"] is not None:
-            feeders[r["next_match_id"]].append(r["match_id"])
+        if r["winner_next_match_id"] is not None:
+            feeders[r["winner_next_match_id"]].append(r["match_id"])
 
     final_id = None
     for mid, r in matches_by_id.items():
-        if r["next_match_id"] is None:
+        if r["winner_next_match_id"] is None:
             final_id = mid
             break
 

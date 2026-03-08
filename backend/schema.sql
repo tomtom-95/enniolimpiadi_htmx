@@ -124,7 +124,8 @@ CREATE TABLE matches (
 -- NOTE: round and position are computed in the application layer
 CREATE TABLE bracket_matches (
     match_id INTEGER PRIMARY KEY REFERENCES matches(id) ON DELETE CASCADE,
-    next_match_id INTEGER REFERENCES matches(id) ON DELETE SET NULL, -- null for final match
+    winner_next_match_id INTEGER REFERENCES matches(id) ON DELETE SET NULL, -- null for final match
+    loser_next_match_id INTEGER REFERENCES matches(id) ON DELETE SET NULL, -- null means eliminated
     version INTEGER NOT NULL DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -180,6 +181,7 @@ CREATE INDEX idx_event_stages_event_id ON event_stages(event_id);
 CREATE INDEX idx_groups_event_stage_id ON groups(event_stage_id);
 CREATE INDEX idx_group_participants_participant_id ON group_participants(participant_id);
 CREATE INDEX idx_matches_group_id ON matches(group_id);
-CREATE INDEX idx_bracket_matches_next_match_id ON bracket_matches(next_match_id);
+CREATE INDEX idx_bracket_matches_winner_next_match_id ON bracket_matches(winner_next_match_id);
+CREATE INDEX idx_bracket_matches_loser_next_match_id ON bracket_matches(loser_next_match_id);
 CREATE INDEX idx_match_participants_participant_id ON match_participants(participant_id);
 CREATE INDEX idx_event_participants_participant_id ON event_participants(participant_id);
