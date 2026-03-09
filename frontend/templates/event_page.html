@@ -100,6 +100,33 @@
                     ............................................................
                 #}
                 {% block event_setup %}
+                    {# --- Score kind selector --- #}
+                    <div class="form-section">
+                        {% block score_kind_section %}
+                            <div id="score-kind-section"
+                                 hx-trigger="sse:score-kind-update"
+                                 hx-get="/api/events/{{ event_id }}/score-kind-section"
+                                 hx-target="this"
+                                 hx-swap="outerHTML">
+                                <details class="stages-setup-details" open>
+                                    <summary class="stages-setup-summary">
+                                        <span class="stages-setup-summary-label">Tipo di punteggio</span>
+                                    </summary>
+                                    {% for sk in score_kinds %}
+                                        {% set active = "active" if sk.kind == current_score_kind else "" %}
+                                        <button type="button"
+                                                class="score-kind-item {{ active }}"
+                                                name="score_kind"
+                                                value="{{ sk.kind }}"
+                                                hx-put="/api/events/{{ event_id }}/score_kind"
+                                                hx-target="#score-kind-section"
+                                                hx-swap="outerHTML">{{ sk.label }}</button>
+                                    {% endfor %}
+                                </details>
+                            </div>
+                        {% endblock %} {# score_kind_section #}
+                    </div>
+
                     {# --- Stages pipeline editor --- #}
                     <div class="form-section">
                         {#

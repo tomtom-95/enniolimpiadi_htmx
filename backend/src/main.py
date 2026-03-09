@@ -47,6 +47,11 @@ def render_event_fragment(block_name: str, **ctx) -> str:
 def render_entity_fragment(block_name: str, **ctx) -> str:
     return _jinja2_render_block(templates.env, "entity_list.html", block_name, **ctx)
 
+SCORE_KINDS = [
+    {"kind": "points", "label": "Punti"},
+    {"kind": "outcome", "label": "Vittoria / Sconfitta"},
+]
+
 STAGE_KINDS = [
     {"advancement_mechanism": "pool", "match_size": 2, "label": "Girone"},
     {"advancement_mechanism": "pool", "match_size": None, "label": "Punteggio Individuale"},
@@ -550,6 +555,15 @@ def get_edit_score(
         ).fetchall()
         score_map = { r["participant_id"]: r["score"] for r in score_rows }
 
+        score_kind_row = conn.execute(
+            "SELECT e.score_kind FROM matches m "
+            "JOIN groups g ON g.id = m.group_id "
+            "JOIN event_stages es ON es.id = g.event_stage_id "
+            "JOIN events e ON e.id = es.event_id WHERE m.id = ?",
+            (match_id,)
+        ).fetchone()
+        score_kind = score_kind_row["score_kind"] if score_kind_row else "points"
+
         def get_participant_name(pid):
             row = conn.execute(
                 "SELECT COALESCE(pl.name, t.name) AS name FROM participants p "
@@ -565,6 +579,7 @@ def get_edit_score(
             "p2_id": p2_id,
             "p1_name": get_participant_name(p1_id),
             "p2_name": get_participant_name(p2_id),
+            "score_kind": score_kind,
             "p1_score": score_map.get(p1_id),
             "p2_score": score_map.get(p2_id),
             "view_round": view_round,
@@ -616,8 +631,10 @@ async def update_match_score(
     match_id: int,
     p1_id: int = Form(...),
     p2_id: int = Form(...),
+    score_kind: str = Form("points"),
     p1_score: int = Form(None),
     p2_score: int = Form(None),
+    outcome: str = Form(None),
     view_round: int = Form(0)
 ):
     conn = request.state.conn
@@ -634,6 +651,14 @@ async def update_match_score(
     html_content, extra_headers = _render_operation_denied(result, olympiad_id, "events")
 
     if result == Status.SUCCESS:
+        if score_kind == "outcome":
+            if outcome == "p1":
+                p1_score, p2_score = 1, 0
+            elif outcome == "p2":
+                p1_score, p2_score = 0, 1
+            else:
+                p1_score, p2_score = 0, 0
+
         for pid, score in [(p1_id, p1_score), (p2_id, p2_score)]:
             conn.execute(
                 "INSERT INTO match_participant_scores (match_id, participant_id, score) VALUES (?, ?, ?) "
@@ -1357,13 +1382,13 @@ def select_event(request: Request, event_id: int, event_name: str = Query(None, 
         max_stage_order = max_stage["max_order"] if max_stage else None
 
         event = conn.execute(
-            "SELECT id, name, version, current_stage_order FROM events WHERE id = ?",
+            "SELECT id, name, version, current_stage_order, score_kind FROM events WHERE id = ?",
             (event_id,)
         ).fetchone()
         event_status = derive_event_status(event["current_stage_order"], max_stage_order)
         extra_ctx = {}
         if event_status == "registration":
-            extra_ctx = _get_registration_ctx(conn, event_id, olympiad_id)
+            extra_ctx = _get_registration_ctx(conn, event_id, olympiad_id, event["score_kind"])
         elif event_status == "finished":
             extra_ctx = _get_stage_ctx(conn, event_id, max_stage_order)
         else:
@@ -1385,7 +1410,7 @@ def select_event(request: Request, event_id: int, event_name: str = Query(None, 
     return response
 
 
-def _get_registration_ctx(conn, event_id: int, olympiad_id: int) -> dict:
+def _get_registration_ctx(conn, event_id: int, olympiad_id: int, score_kind: str = "points") -> dict:
     stages_raw = conn.execute(
         "SELECT es.id, es.stage_order, es.advancement_mechanism, es.match_size, es.advance_count, "
         "COALESCE((SELECT COUNT(*) FROM groups g WHERE g.event_stage_id = es.id), 0) AS num_groups "
@@ -1421,6 +1446,8 @@ def _get_registration_ctx(conn, event_id: int, olympiad_id: int) -> dict:
     ).fetchall()
     available_participants = [p for p in all_participants if p["id"] not in enrolled_ids]
     return dict(
+        score_kinds=SCORE_KINDS,
+        current_score_kind=score_kind,
         stages=stages,
         enrolled_participants=enrolled_participants,
         available_participants=available_participants,
@@ -1487,13 +1514,13 @@ def _set_event_stage_order(request: Request, event_id: int, new_stage_order: int
         max_stage_order = max_stage["max_order"] if max_stage else None
 
         event = conn.execute(
-            "SELECT id, name, version FROM events WHERE id = ?",
+            "SELECT id, name, version, score_kind FROM events WHERE id = ?",
             (event_id,)
         ).fetchone()
         event_status = derive_event_status(new_stage_order, max_stage_order)
         extra_ctx = {}
         if event_status == "registration":
-            extra_ctx = _get_registration_ctx(conn, event_id, olympiad_id)
+            extra_ctx = _get_registration_ctx(conn, event_id, olympiad_id, event["score_kind"])
         elif event_status == "finished":
             extra_ctx = _get_stage_ctx(conn, event_id, max_stage_order)
         else:
@@ -1946,6 +1973,59 @@ def get_stage_groups_content(request: Request, event_id: int, stage_id: int):
 # Event setup section refresh endpoints (used by SSE-triggered refresh)
 # ---------------------------------------------------------------------------
 
+@app.get("/api/events/{event_id}/score-kind-section")
+def get_score_kind_section(request: Request, event_id: int):
+    conn = request.state.conn
+    row = conn.execute(
+        "SELECT score_kind, version FROM events WHERE id = ?", (event_id,)
+    ).fetchone()
+    return HTMLResponse(render_event_fragment("score_kind_section",
+        event_id=event_id, event_version=row["version"],
+        score_kinds=SCORE_KINDS,
+        current_score_kind=row["score_kind"],
+    ))
+
+
+@app.put("/api/events/{event_id}/score_kind")
+def update_event_score_kind(request: Request, event_id: int, score_kind: str = Form(...)):
+    conn = request.state.conn
+
+    olympiad_badge_ctx = get_olympiad_from_request(request)
+    olympiad_id = olympiad_badge_ctx["id"]
+
+    conn.execute("BEGIN IMMEDIATE")
+
+    result = Status.SUCCESS
+    if not check_user_authorized(request, olympiad_id):
+        result = Status.NOT_AUTHORIZED
+
+    html_content, extra_headers = _render_operation_denied(result, olympiad_id, "events")
+
+    if result == Status.SUCCESS:
+        event_version = conn.execute(
+            "UPDATE events SET score_kind = ? WHERE id = ? RETURNING version",
+            (score_kind, event_id)
+        ).fetchone()["version"]
+        html_content = render_event_fragment("score_kind_section",
+            event_id=event_id, event_version=event_version,
+            score_kinds=SCORE_KINDS,
+            current_score_kind=score_kind,
+        )
+        extra_headers["HX-Retarget"] = "#score-kind-section"
+        extra_headers["HX-Reswap"] = "outerHTML"
+
+    response = HTMLResponse(html_content)
+    response.headers.update(extra_headers)
+
+    if result == Status.SUCCESS:
+        conn.commit()
+        notify_event(event_id, "score-kind-update")
+    else:
+        conn.rollback()
+
+    return response
+
+
 @app.get("/api/events/{event_id}/stages-section")
 def get_stages_section(request: Request, event_id: int):
     conn = request.state.conn
@@ -2038,6 +2118,10 @@ def get_event_setup(request: Request, event_id: int, version: int = Query(...)):
     html_content, extra_headers = _render_operation_denied(result, olympiad_id, "events")
 
     if result == Status.SUCCESS:
+        current_score_kind = conn.execute(
+            "SELECT score_kind FROM events WHERE id = ?", (event_id,)
+        ).fetchone()["score_kind"]
+
         stages_raw = conn.execute(
             "SELECT es.id, es.stage_order, es.advancement_mechanism, es.match_size, es.advance_count, "
             "COALESCE((SELECT COUNT(*) FROM groups g WHERE g.event_stage_id = es.id), 0) AS num_groups "
@@ -2052,6 +2136,8 @@ def get_event_setup(request: Request, event_id: int, version: int = Query(...)):
             "event_setup",
             event_id=event_id,
             event_version=version,
+            score_kinds=SCORE_KINDS,
+            current_score_kind=current_score_kind,
             stages=stages,
         )
 

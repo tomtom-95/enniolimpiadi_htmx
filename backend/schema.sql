@@ -15,6 +15,7 @@ CREATE TABLE events (
     olympiad_id INTEGER NOT NULL REFERENCES olympiads(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     current_stage_order INTEGER NOT NULL DEFAULT 0, -- 0=registration, 1..N=started, >max=finished
+    score_kind TEXT NOT NULL DEFAULT 'points' CHECK(score_kind IN ('points', 'outcome')), -- UI hint only: 'points'=numeric inputs, 'outcome'=win/draw/loss picker
     version INTEGER NOT NULL DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
