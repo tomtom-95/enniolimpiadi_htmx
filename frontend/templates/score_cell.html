@@ -1,6 +1,6 @@
 <div id="score-cell-{{ match_id }}"
     class="grid-cell{% if score %} has-score{% endif %}"
-    hx-get="/api/events/{{ event_id }}/matches/{{ match_id }}/score/edit?p1_id={{ p1_id }}&p2_id={{ p2_id }}&score_kind={{ score_kind }}"
+    hx-get="/api/events/{{ event_id }}/matches/{{ match_id }}/score/edit?p1_id={{ p1_id }}&p2_id={{ p2_id }}"
     hx-target="#modal-container"
     hx-swap="innerHTML">
     {{ score or '-' }}

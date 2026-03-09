@@ -15,7 +15,6 @@ CREATE TABLE events (
     olympiad_id INTEGER NOT NULL REFERENCES olympiads(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     current_stage_order INTEGER NOT NULL DEFAULT 0, -- 0=registration, 1..N=started, >max=finished
-    score_kind TEXT NOT NULL CHECK(score_kind IN ('points', 'outcome')),
     version INTEGER NOT NULL DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -68,22 +67,11 @@ CREATE TABLE event_participants (
 -- =====================
 -- TOURNAMENT STRUCTURE
 -- =====================
-CREATE TABLE stage_kinds (
-    kind TEXT PRIMARY KEY,
-    label TEXT NOT NULL
-);
-
--- Insert reference data for stage kinds
-INSERT INTO stage_kinds (kind, label) VALUES
-    ('groups', 'Fase a Gironi'),
-    ('round_robin', 'Girone Unico'),
-    ('single_elimination', 'Eliminazione Diretta'),
-    ('individual_score', 'Punteggio Individuale');
-
 CREATE TABLE event_stages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
-    kind TEXT NOT NULL REFERENCES stage_kinds(kind) CHECK(kind IN ('groups', 'round_robin', 'single_elimination', 'individual_score')),
+    advancement_mechanism TEXT NOT NULL DEFAULT 'pool' CHECK(advancement_mechanism IN ('pool', 'bracket')),
+    match_size INTEGER, -- NULL means all participants in one match; 2 means head-to-head
     stage_order INTEGER NOT NULL,
     advance_count INTEGER, -- null for final stage
     version INTEGER NOT NULL DEFAULT 1,

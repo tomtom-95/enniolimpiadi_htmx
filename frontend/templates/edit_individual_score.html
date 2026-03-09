@@ -6,7 +6,6 @@
         <form hx-put="/api/events/{{ event_id }}/matches/{{ match_id }}/individual-score"
               _="on htmx:afterOnLoad trigger closeModal on body">
             <input type="hidden" name="participant_id" value="{{ participant_id }}">
-            <input type="hidden" name="score_kind" value="{{ score_kind }}">
             <div class="score-modal-inputs">
                 <span class="score-modal-name">{{ participant_name }}</span>
                 <input type="number"

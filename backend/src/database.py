@@ -80,39 +80,39 @@ def seed_dummy_data(db_path: Path):
         conn.executemany("INSERT INTO players (olympiad_id, name) VALUES (?, ?)", players)
 
         _events = [
-            (olympiad_id, "Event1" , "points"),
-            (olympiad_id, "Event2" , "points"),
-            (olympiad_id, "Event3" , "points"),
-            (olympiad_id, "Event4" , "points"),
-            (olympiad_id, "Event5" , "points"),
-            (olympiad_id, "Event6" , "points"),
-            (olympiad_id, "Event7" , "points"),
-            (olympiad_id, "Event8" , "points"),
-            (olympiad_id, "Event9" , "points"),
-            (olympiad_id, "Event10", "points"),
-            (olympiad_id, "Event11", "points"),
-            (olympiad_id, "Event12", "points"),
-            (olympiad_id, "Event13", "points"),
-            (olympiad_id, "Event14", "points"),
-            (olympiad_id, "Event15", "points"),
-            (olympiad_id, "Event16", "points")
+            (olympiad_id, "Event1" ),
+            (olympiad_id, "Event2" ),
+            (olympiad_id, "Event3" ),
+            (olympiad_id, "Event4" ),
+            (olympiad_id, "Event5" ),
+            (olympiad_id, "Event6" ),
+            (olympiad_id, "Event7" ),
+            (olympiad_id, "Event8" ),
+            (olympiad_id, "Event9" ),
+            (olympiad_id, "Event10"),
+            (olympiad_id, "Event11"),
+            (olympiad_id, "Event12"),
+            (olympiad_id, "Event13"),
+            (olympiad_id, "Event14"),
+            (olympiad_id, "Event15"),
+            (olympiad_id, "Event16")
         ]
-        conn.executemany("INSERT INTO events (olympiad_id, name, score_kind) VALUES (?, ?, ?)", _events)
+        conn.executemany("INSERT INTO events (olympiad_id, name) VALUES (?, ?)", _events)
 
         # Create event stages for Event1
         conn.execute(
-            "INSERT INTO event_stages (event_id, kind, stage_order) VALUES (?, ?, ?)",
-            (1, "groups", 1)
+            "INSERT INTO event_stages (event_id, advancement_mechanism, match_size, stage_order) VALUES (?, ?, ?, ?)",
+            (1, "pool", 2, 1)
         )
         conn.execute(
-            "INSERT INTO event_stages (event_id, kind, stage_order) VALUES (?, ?, ?)",
-            (1, "single_elimination", 2)
+            "INSERT INTO event_stages (event_id, advancement_mechanism, match_size, stage_order) VALUES (?, ?, ?, ?)",
+            (1, "bracket", 2, 2)
         )
 
         # Create event stage for Event2 (individual_score)
         conn.execute(
-            "INSERT INTO event_stages (event_id, kind, stage_order) VALUES (?, ?, ?)",
-            (2, "individual_score", 1)
+            "INSERT INTO event_stages (event_id, advancement_mechanism, match_size, stage_order) VALUES (?, ?, ?, ?)",
+            (2, "pool", None, 1)
         )
 
         # Now I must create participants with team_id = NULL (they are just player)

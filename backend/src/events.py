@@ -262,13 +262,6 @@ def present_individual_score_stage(conn, stage_id: int):
     Returns one group entry per group, each with a ranked participant list
     (sorted by score descending; unscored participants go last).
     """
-    event_row = conn.execute(
-        "SELECT e.score_kind FROM event_stages es "
-        "JOIN events e ON e.id = es.event_id WHERE es.id = ?",
-        (stage_id,)
-    ).fetchone()
-    score_kind = event_row["score_kind"] if event_row else "points"
-
     group_rows = conn.execute(
         "SELECT id FROM groups WHERE event_stage_id = ? ORDER BY id",
         (stage_id,)
@@ -318,20 +311,12 @@ def present_individual_score_stage(conn, stage_id: int):
         "groups": groups,
         "id": stage_id,
         "total_participants": total_participants,
-        "score_kind": score_kind,
         "advance_count": advance_count,
     }
 
 
 def present_groups_stage(conn, stage_id: int):
     """Build and render a groups stage for display."""
-
-    event_row = conn.execute(
-        "SELECT e.score_kind FROM event_stages es "
-        "JOIN events e ON e.id = es.event_id WHERE es.id = ?",
-        (stage_id,)
-    ).fetchone()
-    score_kind = event_row["score_kind"] if event_row else "points"
 
     # Build groups data
     group_rows = conn.execute(
@@ -407,29 +392,21 @@ def present_groups_stage(conn, stage_id: int):
         "groups": groups,
         "id": stage_id,
         "total_participants": total_participants,
-        "score_kind": score_kind,
         "advance_count": advance_count,
     }
 
     return stage
 
 
-def determine_bracket_winner(p1_id, p1_score, p2_id, p2_score, score_kind):
+def determine_bracket_winner(p1_id, p1_score, p2_id, p2_score):
     """Return the winner's participant_id, or None if there is no clear winner."""
     if p1_score is None or p2_score is None:
         return None
-    if score_kind == "outcome":
-        if p1_score == 1 and p2_score == 0:
-            return p1_id
-        elif p2_score == 1 and p1_score == 0:
-            return p2_id
-        return None
-    else:  # points
-        if p1_score > p2_score:
-            return p1_id
-        elif p2_score > p1_score:
-            return p2_id
-        return None
+    if p1_score > p2_score:
+        return p1_id
+    elif p2_score > p1_score:
+        return p2_id
+    return None
 
 
 def _cascade_clear_bracket(conn, match_id, pids):
@@ -520,13 +497,6 @@ def present_single_elimination_stage(conn, stage_id, view_round=0):
     view_round index, along with navigation metadata.
     """
 
-    event_row = conn.execute(
-        "SELECT e.score_kind FROM event_stages es "
-        "JOIN events e ON e.id = es.event_id WHERE es.id = ?",
-        (stage_id,)
-    ).fetchone()
-    score_kind = event_row["score_kind"] if event_row else "points"
-
     rows = conn.execute(
         "SELECT m.id AS match_id, bm.winner_next_match_id, bm.loser_next_match_id "
         "FROM groups g "
@@ -537,7 +507,7 @@ def present_single_elimination_stage(conn, stage_id, view_round=0):
     ).fetchall()
 
     if not rows:
-        return {"rounds": [], "id": stage_id, "score_kind": score_kind,
+        return {"rounds": [], "id": stage_id,
                 "view_round": 0, "total_rounds": 0, "has_prev": False, "has_next": False,
                 "total_rows": 0, "third_place_match": None}
 
@@ -621,7 +591,7 @@ def present_single_elimination_stage(conn, stage_id, view_round=0):
                 p2_name = "Bye"
             winner_id = None
             if has_score and clickable:
-                winner_id = determine_bracket_winner(p1_id, s1, p2_id, s2, score_kind)
+                winner_id = determine_bracket_winner(p1_id, s1, p2_id, s2)
             match_dicts.append({
                 "match_id":  mid,
                 "p1":        p1_name,
@@ -669,7 +639,7 @@ def present_single_elimination_stage(conn, stage_id, view_round=0):
         clickable = len(parts) == 2
         tp_winner_id = None
         if has_score and clickable:
-            tp_winner_id = determine_bracket_winner(p1_id, s1, p2_id, s2, score_kind)
+            tp_winner_id = determine_bracket_winner(p1_id, s1, p2_id, s2)
         third_place_match = {
             "match_id":  third_place_id,
             "p1":        p1_name,
@@ -685,7 +655,6 @@ def present_single_elimination_stage(conn, stage_id, view_round=0):
     return {
         "rounds": sliced,
         "id": stage_id,
-        "score_kind": score_kind,
         "view_round": view_round,
         "total_rounds": total_rounds,
         "has_prev": view_round > 0,
@@ -706,12 +675,10 @@ def compute_group_standings(conn, stage_id: int):
     Returns list of {"group_id": int, "ranked_participants": [participant_id, ...]}.
     """
     stage_row = conn.execute(
-        "SELECT es.kind, e.score_kind FROM event_stages es "
-        "JOIN events e ON e.id = es.event_id WHERE es.id = ?",
+        "SELECT match_size FROM event_stages WHERE id = ?",
         (stage_id,)
     ).fetchone()
-    stage_kind = stage_row["kind"] if stage_row else "groups"
-    score_kind = stage_row["score_kind"] if stage_row else "points"
+    match_size = stage_row["match_size"] if stage_row else 2
 
     group_rows = conn.execute(
         "SELECT id FROM groups WHERE event_stage_id = ? ORDER BY id",
@@ -720,7 +687,7 @@ def compute_group_standings(conn, stage_id: int):
 
     result = []
 
-    if stage_kind == "individual_score":
+    if match_size is None:
         for grow in group_rows:
             gid = grow["id"]
             match_row = conn.execute(
@@ -770,35 +737,21 @@ def compute_group_standings(conn, stage_id: int):
             (gid,)
         ).fetchall()
 
-        stats = {pid: {"wins": 0, "draws": 0, "total_points": 0} for pid in participant_ids}
+        stats = {pid: {"wins": 0, "total_points": 0} for pid in participant_ids}
         for mr in match_rows:
             p1, p2 = mr["p1_id"], mr["p2_id"]
             s1, s2 = mr["p1_score"], mr["p2_score"]
             if s1 is None or s2 is None:
                 continue
-            if score_kind == "outcome":
-                if s1 == 1 and s2 == 0:
-                    stats[p1]["wins"] += 1
-                elif s2 == 1 and s1 == 0:
-                    stats[p2]["wins"] += 1
-                else:
-                    stats[p1]["draws"] += 1
-                    stats[p2]["draws"] += 1
-            else:  # points: winner is whoever scored more; total points break ties
-                stats[p1]["total_points"] += s1
-                stats[p2]["total_points"] += s2
-                if s1 > s2:
-                    stats[p1]["wins"] += 1
-                elif s2 > s1:
-                    stats[p2]["wins"] += 1
-                # exact tie: no win credited to either
+            stats[p1]["total_points"] += s1
+            stats[p2]["total_points"] += s2
+            if s1 > s2:
+                stats[p1]["wins"] += 1
+            elif s2 > s1:
+                stats[p2]["wins"] += 1
 
-        if score_kind == "outcome":
-            ranked = sorted(participant_ids,
-                            key=lambda pid: (-stats[pid]["wins"], -stats[pid]["draws"], pid))
-        else:
-            ranked = sorted(participant_ids,
-                            key=lambda pid: (-stats[pid]["wins"], -stats[pid]["total_points"], pid))
+        ranked = sorted(participant_ids,
+                        key=lambda pid: (-stats[pid]["wins"], -stats[pid]["total_points"], pid))
 
         result.append({"group_id": gid, "ranked_participants": ranked})
 
@@ -814,8 +767,9 @@ def populate_next_stage_from_groups(conn, stage_id: int) -> bool:
     row = conn.execute(
         """
         SELECT es.advance_count,
-               (SELECT id   FROM event_stages WHERE event_id = es.event_id AND stage_order = es.stage_order + 1) AS next_stage_id,
-               (SELECT kind FROM event_stages WHERE event_id = es.event_id AND stage_order = es.stage_order + 1) AS next_stage_kind
+               (SELECT id                   FROM event_stages WHERE event_id = es.event_id AND stage_order = es.stage_order + 1) AS next_stage_id,
+               (SELECT advancement_mechanism FROM event_stages WHERE event_id = es.event_id AND stage_order = es.stage_order + 1) AS next_advancement_mechanism,
+               (SELECT match_size           FROM event_stages WHERE event_id = es.event_id AND stage_order = es.stage_order + 1) AS next_match_size
         FROM event_stages es WHERE es.id = ?
         """,
         (stage_id,)
@@ -826,7 +780,8 @@ def populate_next_stage_from_groups(conn, stage_id: int) -> bool:
 
     advance_count = row["advance_count"]
     next_stage_id = row["next_stage_id"]
-    next_stage_kind = row["next_stage_kind"]
+    next_advancement_mechanism = row["next_advancement_mechanism"]
+    next_match_size = row["next_match_size"]
 
     standings = compute_group_standings(conn, stage_id)
     qualified_ids = []
@@ -836,19 +791,19 @@ def populate_next_stage_from_groups(conn, stage_id: int) -> bool:
     if not qualified_ids:
         return False
 
-    if next_stage_kind == "single_elimination":
+    if next_advancement_mechanism == "bracket":
         generate_single_elimination_stage(conn, next_stage_id, participant_ids=qualified_ids)
-    elif next_stage_kind == "groups":
-        existing_count = conn.execute(
-            "SELECT COUNT(*) AS cnt FROM groups WHERE event_stage_id = ?", (next_stage_id,)
-        ).fetchone()["cnt"]
-        num_groups = max(1, existing_count) if existing_count > 0 else 1
-        generate_groups_stage(conn, next_stage_id, num_groups, participant_ids=qualified_ids)
-    elif next_stage_kind == "individual_score":
+    elif next_match_size is None:
         existing_count = conn.execute(
             "SELECT COUNT(*) AS cnt FROM groups WHERE event_stage_id = ?", (next_stage_id,)
         ).fetchone()["cnt"]
         num_groups = max(1, existing_count) if existing_count > 0 else 1
         generate_individual_score_stage(conn, next_stage_id, num_groups, participant_ids=qualified_ids)
+    else:
+        existing_count = conn.execute(
+            "SELECT COUNT(*) AS cnt FROM groups WHERE event_stage_id = ?", (next_stage_id,)
+        ).fetchone()["cnt"]
+        num_groups = max(1, existing_count) if existing_count > 0 else 1
+        generate_groups_stage(conn, next_stage_id, num_groups, participant_ids=qualified_ids)
 
     return True

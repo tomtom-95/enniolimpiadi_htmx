@@ -7,9 +7,9 @@
      _="on click elsewhere or keyup[key=='Escape'] from window trigger closeStageKindEdit">
     {% for sk in stage_kinds %}
         <button type="button"
-                class="stage-kind-option {{ 'active' if sk.kind == current_kind }}"
+                class="stage-kind-option {{ 'active' if sk.advancement_mechanism == current_advancement_mechanism and sk.match_size == current_match_size }}"
                 hx-patch="/api/events/{{ event_id }}/stages/{{ stage_id }}"
-                hx-vals='{"kind": "{{ sk.kind }}"}'
+                hx-vals='{"advancement_mechanism": "{{ sk.advancement_mechanism }}", "match_size": "{{ sk.match_size if sk.match_size is not none else '' }}"}'
                 hx-target="#stages-setup-section"
                 hx-swap="outerHTML"
                 _="on htmx:afterRequest trigger closeStageKindEdit">{{ sk.label }}</button>

@@ -100,38 +100,6 @@
                     ............................................................
                 #}
                 {% block event_setup %}
-                    {# --- Score kind selector --- #}
-                    <div class="form-section">
-                        <details class="stages-setup-details" open>
-                            <summary class="stages-setup-summary">
-                                <span class="stages-setup-summary-label">Tipo di punteggio</span>
-                            </summary>
-                            {#
-                                BLOCK: score_kind_section
-                                Listens for SSE "score-kind-update" and reloads itself.
-                                Renders a button per score kind; active one is highlighted.
-                            #}
-                            {% block score_kind_section %}
-                                <div id="score-kind-section"
-                                     hx-trigger="sse:score-kind-update"
-                                     hx-get="/api/events/{{ event_id }}/score-kind-section"
-                                     hx-target="this"
-                                     hx-swap="outerHTML">
-                                    {% for sk in score_kinds %}
-                                        {% set active = "active" if sk.kind == current_score_kind else "" %}
-                                        <button type="button"
-                                                class="score-kind-item {{ active }}"
-                                                name="score_kind"
-                                                value="{{ sk.kind }}"
-                                                hx-put="/api/events/{{ event_id }}/score_kind"
-                                                hx-target="#score-kind-section"
-                                                hx-swap="outerHTML">{{ sk.label }}</button>
-                                    {% endfor %}
-                                </div>
-                            {% endblock %} {# score_kind_section #}
-                        </details>
-                    </div>
-
                     {# --- Stages pipeline editor --- #}
                     <div class="form-section">
                         {#
@@ -169,7 +137,7 @@
                                                     </button>
                                                 </div>
                                                 {# Groups and individual_score: +/- control for number of groups #}
-                                                {% if stage.kind in ('groups', 'individual_score') %}
+                                                {% if stage.advancement_mechanism == 'pool' %}
                                                     <div class="stage-groups-setup">
                                                         <span class="stage-groups-setup-label">Gironi</span>
                                                         <div class="group-resize-controls">
@@ -214,7 +182,7 @@
                                                             </div>
                                                         </div>
                                                     {% endif %}
-                                                {% endif %} {# stage.kind in groups/individual_score #}
+                                                {% endif %} {# stage.advancement_mechanism == 'pool' #}
                                                 <button class="btn-remove-stage"
                                                         hx-delete="/api/events/{{ event_id }}/stages/{{ stage.id }}"
                                                         hx-target="#stages-setup-section"
@@ -410,7 +378,7 @@
                                                                                 {% if match_info %}
                                                                                     <div id="score-cell-{{ match_info.match_id }}"
                                                                                          class="grid-cell{% if match_info.score %} has-score{% endif %}"
-                                                                                         hx-get="/api/events/{{ event_id }}/matches/{{ match_info.match_id }}/score/edit?p1_id={{ match_info.p1_id }}&p2_id={{ match_info.p2_id }}&score_kind={{ stage.score_kind }}"
+                                                                                         hx-get="/api/events/{{ event_id }}/matches/{{ match_info.match_id }}/score/edit?p1_id={{ match_info.p1_id }}&p2_id={{ match_info.p2_id }}"
                                                                                          hx-target="#modal-container"
                                                                                          hx-swap="innerHTML">
                                                                                         {{ match_info.score or '-' }}
@@ -466,7 +434,7 @@
                                                         <div class="individual-score-list">
                                                             {% for participant in group.participants %}
                                                                 <div class="individual-score-row"
-                                                                     hx-get="/api/events/{{ event_id }}/matches/{{ group.match_id }}/individual-score/edit?participant_id={{ participant.id }}&score_kind={{ stage.score_kind }}"
+                                                                     hx-get="/api/events/{{ event_id }}/matches/{{ group.match_id }}/individual-score/edit?participant_id={{ participant.id }}"
                                                                      hx-target="#modal-container"
                                                                      hx-swap="innerHTML">
                                                                     <span class="individual-score-rank">{{ loop.index }}</span>
@@ -543,7 +511,7 @@
                                                                 <div class="bracket-match clickable"
                                                                      style="grid-column: {{ col }};
                                                                             grid-row: {{ row_start }} / span 2"
-                                                                     hx-get="/api/events/{{ event_id }}/matches/{{ match.match_id }}/score/edit?p1_id={{ match.p1_id }}&p2_id={{ match.p2_id }}&score_kind={{ stage.score_kind }}&view_round={{ stage.view_round }}"
+                                                                     hx-get="/api/events/{{ event_id }}/matches/{{ match.match_id }}/score/edit?p1_id={{ match.p1_id }}&p2_id={{ match.p2_id }}&view_round={{ stage.view_round }}"
                                                                      hx-target="#modal-container"
                                                                      hx-swap="innerHTML">
                                                             {% else %}
@@ -568,7 +536,7 @@
                                                         <div class="third-place-label">Finale 3° Posto</div>
                                                         {% if match.clickable %}
                                                             <div class="bracket-match clickable third-place-match"
-                                                                 hx-get="/api/events/{{ event_id }}/matches/{{ match.match_id }}/score/edit?p1_id={{ match.p1_id }}&p2_id={{ match.p2_id }}&score_kind={{ stage.score_kind }}&view_round={{ stage.view_round }}"
+                                                                 hx-get="/api/events/{{ event_id }}/matches/{{ match.match_id }}/score/edit?p1_id={{ match.p1_id }}&p2_id={{ match.p2_id }}&view_round={{ stage.view_round }}"
                                                                  hx-target="#modal-container"
                                                                  hx-swap="innerHTML">
                                                         {% else %}
