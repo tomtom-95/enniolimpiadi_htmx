@@ -190,6 +190,30 @@
                                                                     hx-swap="outerHTML">&plus;</button>
                                                         </div>
                                                     </div>
+                                                    {# Advance count: only for non-last stages #}
+                                                    {% if not loop.last %}
+                                                        {% set ac = stage.advance_count or 1 %}
+                                                        <div class="stage-groups-setup">
+                                                            <span class="stage-groups-setup-label">Avanzano</span>
+                                                            <div class="group-resize-controls">
+                                                                {% if ac > 1 %}
+                                                                    <button class="group-resize-btn"
+                                                                            hx-post="/api/events/{{ event_id }}/stages/{{ stage.id }}/advance-count"
+                                                                            hx-vals='{"advance_count": {{ ac - 1 }}}'
+                                                                            hx-target="#stages-setup-section"
+                                                                            hx-swap="outerHTML">&minus;</button>
+                                                                {% else %}
+                                                                    <button class="group-resize-btn" disabled>&minus;</button>
+                                                                {% endif %}
+                                                                <span class="group-resize-value">{{ ac }}</span>
+                                                                <button class="group-resize-btn"
+                                                                        hx-post="/api/events/{{ event_id }}/stages/{{ stage.id }}/advance-count"
+                                                                        hx-vals='{"advance_count": {{ ac + 1 }}}'
+                                                                        hx-target="#stages-setup-section"
+                                                                        hx-swap="outerHTML">&plus;</button>
+                                                            </div>
+                                                        </div>
+                                                    {% endif %}
                                                 {% endif %} {# stage.kind == 'groups' #}
                                                 <button class="btn-remove-stage"
                                                         hx-delete="/api/events/{{ event_id }}/stages/{{ stage.id }}"
@@ -314,11 +338,19 @@
                             {% endif %} {# stage_order > 1 #}
                         <span class="stage-indicator">{{ stage.name }} ({{ stage_order }}/{{ total_stages }})</span>
                         {% if stage_order < total_stages %}
-                            <button class="stage-arrow"
-                                    hx-get="/api/events/{{ event_id }}/stage/{{ stage_order + 1 }}"
-                                    hx-target="#stage-content"
-                                    hx-swap="outerHTML transition:true"
-                                    _="on click add .animating-stage to <html/> remove .animating-bracket from <html/> remove .slide-back from <html/>">&#8594;</button>
+                            {% if stage_kind == "groups" and stage.advance_count %}
+                                <button class="stage-arrow"
+                                        hx-post="/api/events/{{ event_id }}/stage/{{ stage_order }}/go-next"
+                                        hx-target="#stage-content"
+                                        hx-swap="outerHTML transition:true"
+                                        _="on click add .animating-stage to <html/> remove .animating-bracket from <html/> remove .slide-back from <html/>">&#8594;</button>
+                            {% else %}
+                                <button class="stage-arrow"
+                                        hx-get="/api/events/{{ event_id }}/stage/{{ stage_order + 1 }}"
+                                        hx-target="#stage-content"
+                                        hx-swap="outerHTML transition:true"
+                                        _="on click add .animating-stage to <html/> remove .animating-bracket from <html/> remove .slide-back from <html/>">&#8594;</button>
+                            {% endif %}
                         {% else %}
                             <button class="stage-arrow" disabled>&#8594;</button>
                         {% endif %} {# stage_order < total_stages #}
@@ -337,6 +369,11 @@
                             #}
                             {% block stage_groups_content %}
                                 <div id="stage-groups-content">
+                                    {% if stage.advance_count and stage_order < total_stages %}
+                                        <div class="stage-advance-info">
+                                            Le prime {{ stage.advance_count }} per girone avanzano alla fase successiva
+                                        </div>
+                                    {% endif %}
                                     {% block stage_groups_inner %}
                                         <div id="stage-groups-inner"
                                              hx-trigger="sse:score-update"
@@ -455,7 +492,7 @@
                                                                 <div class="bracket-match clickable"
                                                                      style="grid-column: {{ col }};
                                                                             grid-row: {{ row_start }} / span 2"
-                                                                     hx-get="/api/events/{{ event_id }}/matches/{{ match.match_id }}/score/edit?p1_id={{ match.p1_id }}&p2_id={{ match.p2_id }}&score_kind={{ stage.score_kind }}"
+                                                                     hx-get="/api/events/{{ event_id }}/matches/{{ match.match_id }}/score/edit?p1_id={{ match.p1_id }}&p2_id={{ match.p2_id }}&score_kind={{ stage.score_kind }}&view_round={{ stage.view_round }}"
                                                                      hx-target="#modal-container"
                                                                      hx-swap="innerHTML">
                                                             {% else %}
@@ -480,7 +517,7 @@
                                                         <div class="third-place-label">Finale 3° Posto</div>
                                                         {% if match.clickable %}
                                                             <div class="bracket-match clickable third-place-match"
-                                                                 hx-get="/api/events/{{ event_id }}/matches/{{ match.match_id }}/score/edit?p1_id={{ match.p1_id }}&p2_id={{ match.p2_id }}&score_kind={{ stage.score_kind }}"
+                                                                 hx-get="/api/events/{{ event_id }}/matches/{{ match.match_id }}/score/edit?p1_id={{ match.p1_id }}&p2_id={{ match.p2_id }}&score_kind={{ stage.score_kind }}&view_round={{ stage.view_round }}"
                                                                  hx-target="#modal-container"
                                                                  hx-swap="innerHTML">
                                                         {% else %}

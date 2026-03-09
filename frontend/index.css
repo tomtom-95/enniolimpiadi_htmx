@@ -1222,6 +1222,19 @@ html.slide-back::view-transition-new(stage-slide) {
     gap: 1rem;
 }
 
+.stage-advance-info {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #9995a8;
+    text-align: center;
+    padding: 0.4rem 0.75rem;
+    margin-bottom: 0.5rem;
+    background-color: #f5f2ee;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
 .group-card {
     background-color: #fff;
     border-radius: 4px;

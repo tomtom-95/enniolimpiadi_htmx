@@ -516,7 +516,8 @@ def get_edit_score(
     match_id: int,
     p1_id: int = Query(...),
     p2_id: int = Query(...),
-    score_kind: str = Query(...)
+    score_kind: str = Query(...),
+    view_round: int = Query(0)
 ):
     conn = request.state.conn
 
@@ -554,6 +555,7 @@ def get_edit_score(
             "score_kind": score_kind,
             "p1_score": score_map.get(p1_id),
             "p2_score": score_map.get(p2_id),
+            "view_round": view_round,
         }
         html_content = templates.get_template("edit_score.html").render(**template_ctx)
 
@@ -607,7 +609,8 @@ async def update_match_score(
     score_kind: str = Form(...),
     p1_score: int = Form(None),
     p2_score: int = Form(None),
-    outcome: str = Form(None)
+    outcome: str = Form(None),
+    view_round: int = Form(0)
 ):
     conn = request.state.conn
 
@@ -661,7 +664,7 @@ async def update_match_score(
         notify_event(event_id, "score-update")
 
         if stage_kind == "single_elimination":
-            stage = events.present_single_elimination_stage(conn, stage_id)
+            stage = events.present_single_elimination_stage(conn, stage_id, view_round=view_round)
             html_content = render_event_fragment(
                 "stage_bracket_inner",
                 stage=stage,
@@ -1264,7 +1267,7 @@ def _get_registration_ctx(conn, event_id: int, olympiad_id: int, score_kind: str
         "SELECT kind, label FROM stage_kinds ORDER BY kind"
     ).fetchall()
     stages = conn.execute(
-        "SELECT es.id, es.stage_order, es.kind, sk.label, "
+        "SELECT es.id, es.stage_order, es.kind, sk.label, es.advance_count, "
         "COALESCE((SELECT COUNT(*) FROM groups g WHERE g.event_stage_id = es.id), 0) AS num_groups "
         "FROM event_stages es JOIN stage_kinds sk ON sk.kind = es.kind "
         "WHERE es.event_id = ? ORDER BY es.stage_order",
@@ -1530,54 +1533,94 @@ def get_event_stage(request: Request, event_id: int, stage_order: int):
     return response
 
 
+@app.post("/api/events/{event_id}/stage/{stage_order}/go-next")
+def go_to_next_stage(request: Request, event_id: int, stage_order: int):
+    """Populate the next stage from the current groups stage standings, then return its view."""
+    conn = request.state.conn
+
+    stage_row = conn.execute(
+        "SELECT es.id, es.kind, e.version AS event_version "
+        "FROM event_stages es JOIN events e ON e.id = es.event_id "
+        "WHERE es.event_id = ? AND es.stage_order = ?",
+        (event_id, stage_order)
+    ).fetchone()
+
+    if not stage_row:
+        return HTMLResponse("<div class='error-banner'>Fase non trovata</div>")
+
+    events.populate_next_stage_from_groups(conn, stage_row["id"])
+    conn.commit()
+
+    next_order = stage_order + 1
+    next_row = conn.execute(
+        "SELECT es.id, es.kind, sk.label FROM event_stages es "
+        "JOIN stage_kinds sk ON sk.kind = es.kind "
+        "WHERE es.event_id = ? AND es.stage_order = ?",
+        (event_id, next_order)
+    ).fetchone()
+
+    if not next_row:
+        return HTMLResponse("<div class='error-banner'>Fase successiva non trovata</div>")
+
+    total_stages = conn.execute(
+        "SELECT COUNT(*) AS count FROM event_stages WHERE event_id = ?", (event_id,)
+    ).fetchone()["count"]
+
+    next_stage_id   = next_row["id"]
+    next_stage_kind = next_row["kind"]
+    next_stage_label = next_row["label"]
+
+    if next_stage_kind == "groups":
+        stage = events.present_groups_stage(conn, next_stage_id)
+    elif next_stage_kind == "single_elimination":
+        stage = events.present_single_elimination_stage(conn, next_stage_id, view_round=0)
+    else:
+        return HTMLResponse("<div class='error-banner'>Tipo di fase non supportato</div>")
+
+    stage["name"] = next_stage_label
+    html_content = render_event_fragment(
+        "stage_content",
+        stage=stage,
+        stage_kind=next_stage_kind,
+        stage_order=next_order,
+        total_stages=total_stages,
+        event_id=event_id,
+        event_version=stage_row["event_version"],
+    )
+    return HTMLResponse(html_content)
+
+
 @app.post("/api/events/{event_id}/stages/{stage_id}/resize")
-def resize_stage_groups(
-    request: Request,
-    event_id: int,
-    stage_id: int,
-    num_groups: int = Form(...),
-):
+def resize_stage_groups(request: Request, event_id: int, stage_id: int, num_groups: int = Form(...)):
     conn = request.state.conn
 
     olympiad_badge_ctx = get_olympiad_from_request(request)
     olympiad_id = olympiad_badge_ctx["id"]
-    olympiad_name = olympiad_badge_ctx["name"]
-
-    assert olympiad_id != 0
 
     conn.execute("BEGIN IMMEDIATE")
 
     result = Status.SUCCESS
-    # if not check_olympiad_exist(request, olympiad_id):
-    #     result = Status.OLYMPIAD_NOT_FOUND
-    # if result == Status.SUCCESS and not check_olympiad_name(request, olympiad_id, olympiad_name):
-    #     result = Status.OLYMPIAD_RENAMED
-    # if result == Status.SUCCESS and not check_entity_exist(request, "events", event_id):
-    #     result = Status.ENTITY_NOT_FOUND
     if result == Status.SUCCESS and not check_user_authorized(request, olympiad_id):
         result = Status.NOT_AUTHORIZED
-    if result == Status.SUCCESS and not check_event_in_registration(request, event_id):
-        result = Status.EVENT_NOT_IN_REGISTRATION
-    if result == Status.SUCCESS and not check_stage_kind_valid(request, stage_id, event_id):
-        result = Status.STAGE_INVALID
     if result == Status.SUCCESS and not check_min_participants(request, event_id, 2):
         result = Status.NOT_ENOUGH_PARTICIPANTS
 
     html_content, extra_headers = _render_operation_denied(result, olympiad_id, "events")
 
-    if result == Status.ENTITY_NOT_FOUND:
-        html_content = templates.get_template("entity_not_found.html").render()
-    elif result == Status.SUCCESS:
+    if result == Status.SUCCESS:
         events.generate_groups_stage(conn, stage_id, num_groups)
         new_version = conn.execute(
             "UPDATE events SET version = version + 1 WHERE id = ? RETURNING version",
             (event_id,)
         ).fetchone()["version"]
         stage = events.present_groups_stage(conn, stage_id)
-        html_content = render_event_fragment("stage_groups_content",
-            stage=stage, event_id=event_id, event_version=new_version)
+        html_content = render_event_fragment(
+            "stage_groups_content",
+            stage=stage,
+            event_id=event_id,
+            event_version=new_version
+        )
 
-    html_content += _oob_badge_html(request, olympiad_id)
     response = HTMLResponse(html_content)
     response.headers.update(extra_headers)
 
@@ -1703,6 +1746,41 @@ def set_stage_num_groups(request: Request, event_id: int, stage_id: int, num_gro
 
     if result == Status.SUCCESS:
         events.generate_groups_stage(conn, stage_id, max(1, num_groups))
+        html_content = _render_stages_section_html(conn, event_id)
+
+    html_content += _oob_badge_html(request, olympiad_id)
+    response = HTMLResponse(html_content)
+    response.headers.update(extra_headers)
+
+    if result == Status.SUCCESS:
+        conn.commit()
+        notify_event(event_id, "stages-update")
+    else:
+        conn.rollback()
+
+    return response
+
+
+@app.post("/api/events/{event_id}/stages/{stage_id}/advance-count")
+def set_stage_advance_count(request: Request, event_id: int, stage_id: int, advance_count: int = Form(...)):
+    conn = request.state.conn
+
+    olympiad_badge_ctx = get_olympiad_from_request(request)
+    olympiad_id = olympiad_badge_ctx["id"]
+
+    conn.execute("BEGIN IMMEDIATE")
+
+    result = Status.SUCCESS
+    if not check_user_authorized(request, olympiad_id):
+        result = Status.NOT_AUTHORIZED
+
+    html_content, extra_headers = _render_operation_denied(result, olympiad_id, "events")
+
+    if result == Status.SUCCESS:
+        conn.execute(
+            "UPDATE event_stages SET advance_count = ? WHERE id = ? AND event_id = ?",
+            (max(1, advance_count), stage_id, event_id)
+        )
         html_content = _render_stages_section_html(conn, event_id)
 
     html_content += _oob_badge_html(request, olympiad_id)
@@ -2039,7 +2117,7 @@ def _render_stages_section_html(conn, event_id: int):
 
     stages = conn.execute(
         """
-        SELECT es.id, es.stage_order, es.kind, sk.label,
+        SELECT es.id, es.stage_order, es.kind, sk.label, es.advance_count,
                COALESCE((SELECT COUNT(*) FROM groups g WHERE g.event_stage_id = es.id), 0) AS num_groups
         FROM event_stages es
         JOIN stage_kinds sk

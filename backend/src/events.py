@@ -1,10 +1,10 @@
 from itertools import combinations
 from collections import defaultdict, deque
 
-def generate_groups_stage(conn, stage_id: int, num_groups: int):
+def generate_groups_stage(conn, stage_id: int, num_groups: int, participant_ids=None):
     """Tear down and rebuild groups for the given event stage.
 
-    1. Retrieves all enrolled participants from event_participants
+    1. Retrieves all enrolled participants from event_participants (or uses participant_ids)
     2. Distributes them across num_groups groups (round-robin)
     3. Creates round-robin matches within each group
     """
@@ -13,11 +13,12 @@ def generate_groups_stage(conn, stage_id: int, num_groups: int):
     ).fetchone()
     event_id = stage["event_id"]
 
-    participant_rows = conn.execute(
-        "SELECT participant_id FROM event_participants WHERE event_id = ? ORDER BY participant_id",
-        (event_id,)
-    ).fetchall()
-    participant_ids = [r["participant_id"] for r in participant_rows]
+    if participant_ids is None:
+        participant_rows = conn.execute(
+            "SELECT participant_id FROM event_participants WHERE event_id = ? ORDER BY participant_id",
+            (event_id,)
+        ).fetchall()
+        participant_ids = [r["participant_id"] for r in participant_rows]
     n = len(participant_ids)
 
     # Teardown: CASCADE handles group_participants, matches, match_participants, scores
@@ -62,10 +63,10 @@ def generate_groups_stage(conn, stage_id: int, num_groups: int):
             )
 
 
-def generate_single_elimination_stage(conn, stage_id: int):
+def generate_single_elimination_stage(conn, stage_id: int, participant_ids=None):
     """Tear down and rebuild a single-elimination bracket for the given event stage.
 
-    1. Retrieves all enrolled participants from event_participants
+    1. Retrieves all enrolled participants from event_participants (or uses participant_ids)
     2. Creates one group containing all participants
     3. Builds the full bracket tree (matches + bracket_matches links)
     4. Assigns participants to first-round matches with standard seeding and byes
@@ -75,11 +76,12 @@ def generate_single_elimination_stage(conn, stage_id: int):
     ).fetchone()
     event_id = stage["event_id"]
 
-    participant_rows = conn.execute(
-        "SELECT participant_id FROM event_participants WHERE event_id = ? ORDER BY participant_id",
-        (event_id,)
-    ).fetchall()
-    participant_ids = [r["participant_id"] for r in participant_rows]
+    if participant_ids is None:
+        participant_rows = conn.execute(
+            "SELECT participant_id FROM event_participants WHERE event_id = ? ORDER BY participant_id",
+            (event_id,)
+        ).fetchall()
+        participant_ids = [r["participant_id"] for r in participant_rows]
     n = len(participant_ids)
 
     # Teardown: CASCADE handles group_participants, matches, match_participants,
@@ -273,11 +275,17 @@ def present_groups_stage(conn, stage_id: int):
 
     total_participants = sum(len(g["participants"]) for g in groups)
 
+    advance_row = conn.execute(
+        "SELECT advance_count FROM event_stages WHERE id = ?", (stage_id,)
+    ).fetchone()
+    advance_count = advance_row["advance_count"] if advance_row else None
+
     stage = {
         "groups": groups,
         "id": stage_id,
         "total_participants": total_participants,
         "score_kind": score_kind,
+        "advance_count": advance_count,
     }
 
     return stage
@@ -562,3 +570,127 @@ def present_single_elimination_stage(conn, stage_id, view_round=0):
         "total_rows": total_rows,
         "third_place_match": third_place_match,
     }
+
+
+def compute_group_standings(conn, stage_id: int):
+    """Compute participant standings within each group, ranked best first.
+
+    For both scoring kinds, rank by wins desc first.
+    - outcome: tiebreak by draws desc
+    - points:  tiebreak by total points scored desc
+
+    Returns list of {"group_id": int, "ranked_participants": [participant_id, ...]}.
+    """
+    event_row = conn.execute(
+        "SELECT e.score_kind FROM event_stages es "
+        "JOIN events e ON e.id = es.event_id WHERE es.id = ?",
+        (stage_id,)
+    ).fetchone()
+    score_kind = event_row["score_kind"] if event_row else "points"
+
+    group_rows = conn.execute(
+        "SELECT id FROM groups WHERE event_stage_id = ? ORDER BY id",
+        (stage_id,)
+    ).fetchall()
+
+    result = []
+    for grow in group_rows:
+        gid = grow["id"]
+
+        part_rows = conn.execute(
+            "SELECT participant_id FROM group_participants WHERE group_id = ? ORDER BY seed",
+            (gid,)
+        ).fetchall()
+        participant_ids = [r["participant_id"] for r in part_rows]
+
+        match_rows = conn.execute(
+            "SELECT mp1.participant_id AS p1_id, mp2.participant_id AS p2_id, "
+            "  mps1.score AS p1_score, mps2.score AS p2_score "
+            "FROM matches m "
+            "JOIN match_participants mp1 ON mp1.match_id = m.id "
+            "JOIN match_participants mp2 ON mp2.match_id = m.id "
+            "  AND mp2.participant_id > mp1.participant_id "
+            "LEFT JOIN match_participant_scores mps1 "
+            "  ON mps1.match_id = m.id AND mps1.participant_id = mp1.participant_id "
+            "LEFT JOIN match_participant_scores mps2 "
+            "  ON mps2.match_id = m.id AND mps2.participant_id = mp2.participant_id "
+            "WHERE m.group_id = ?",
+            (gid,)
+        ).fetchall()
+
+        stats = {pid: {"wins": 0, "draws": 0, "total_points": 0} for pid in participant_ids}
+        for mr in match_rows:
+            p1, p2 = mr["p1_id"], mr["p2_id"]
+            s1, s2 = mr["p1_score"], mr["p2_score"]
+            if s1 is None or s2 is None:
+                continue
+            if score_kind == "outcome":
+                if s1 == 1 and s2 == 0:
+                    stats[p1]["wins"] += 1
+                elif s2 == 1 and s1 == 0:
+                    stats[p2]["wins"] += 1
+                else:
+                    stats[p1]["draws"] += 1
+                    stats[p2]["draws"] += 1
+            else:  # points: winner is whoever scored more; total points break ties
+                stats[p1]["total_points"] += s1
+                stats[p2]["total_points"] += s2
+                if s1 > s2:
+                    stats[p1]["wins"] += 1
+                elif s2 > s1:
+                    stats[p2]["wins"] += 1
+                # exact tie: no win credited to either
+
+        if score_kind == "outcome":
+            ranked = sorted(participant_ids,
+                            key=lambda pid: (-stats[pid]["wins"], -stats[pid]["draws"], pid))
+        else:
+            ranked = sorted(participant_ids,
+                            key=lambda pid: (-stats[pid]["wins"], -stats[pid]["total_points"], pid))
+
+        result.append({"group_id": gid, "ranked_participants": ranked})
+
+    return result
+
+
+def populate_next_stage_from_groups(conn, stage_id: int) -> bool:
+    """Populate the stage after stage_id using top advance_count participants from each group.
+
+    Returns True if population was performed, False if nothing to do
+    (no advance_count set or no next stage).
+    """
+    row = conn.execute(
+        """
+        SELECT es.advance_count,
+               (SELECT id   FROM event_stages WHERE event_id = es.event_id AND stage_order = es.stage_order + 1) AS next_stage_id,
+               (SELECT kind FROM event_stages WHERE event_id = es.event_id AND stage_order = es.stage_order + 1) AS next_stage_kind
+        FROM event_stages es WHERE es.id = ?
+        """,
+        (stage_id,)
+    ).fetchone()
+
+    if not row or not row["advance_count"] or not row["next_stage_id"]:
+        return False
+
+    advance_count = row["advance_count"]
+    next_stage_id = row["next_stage_id"]
+    next_stage_kind = row["next_stage_kind"]
+
+    standings = compute_group_standings(conn, stage_id)
+    qualified_ids = []
+    for group in standings:
+        qualified_ids.extend(group["ranked_participants"][:advance_count])
+
+    if not qualified_ids:
+        return False
+
+    if next_stage_kind == "single_elimination":
+        generate_single_elimination_stage(conn, next_stage_id, participant_ids=qualified_ids)
+    elif next_stage_kind == "groups":
+        existing_count = conn.execute(
+            "SELECT COUNT(*) AS cnt FROM groups WHERE event_stage_id = ?", (next_stage_id,)
+        ).fetchone()["cnt"]
+        num_groups = max(1, existing_count) if existing_count > 0 else 1
+        generate_groups_stage(conn, next_stage_id, num_groups, participant_ids=qualified_ids)
+
+    return True
