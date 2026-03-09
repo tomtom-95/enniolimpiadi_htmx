@@ -200,6 +200,129 @@ def generate_single_elimination_stage(conn, stage_id: int, participant_ids=None)
                 )
 
 
+def generate_individual_score_stage(conn, stage_id: int, num_groups: int, participant_ids=None):
+    """Tear down and rebuild groups for the given individual_score event stage.
+
+    Each group gets exactly one match containing all participants in the group.
+    Participants submit individual scores; ranking is by score descending.
+    """
+    stage = conn.execute(
+        "SELECT event_id FROM event_stages WHERE id = ?", (stage_id,)
+    ).fetchone()
+    event_id = stage["event_id"]
+
+    if participant_ids is None:
+        participant_rows = conn.execute(
+            "SELECT participant_id FROM event_participants WHERE event_id = ? ORDER BY participant_id",
+            (event_id,)
+        ).fetchall()
+        participant_ids = [r["participant_id"] for r in participant_rows]
+    n = len(participant_ids)
+
+    conn.execute("DELETE FROM groups WHERE event_stage_id = ?", (stage_id,))
+
+    if n < 1:
+        return
+
+    num_groups = max(1, min(num_groups, n))
+
+    buckets = [[] for _ in range(num_groups)]
+    for i, pid in enumerate(participant_ids):
+        buckets[i % num_groups].append(pid)
+
+    for bucket in buckets:
+        if not bucket:
+            continue
+        group_id = conn.execute(
+            "INSERT INTO groups (event_stage_id) VALUES (?) RETURNING id",
+            (stage_id,)
+        ).fetchone()["id"]
+
+        for seed, pid in enumerate(bucket):
+            conn.execute(
+                "INSERT INTO group_participants (group_id, participant_id, seed) VALUES (?, ?, ?)",
+                (group_id, pid, seed)
+            )
+
+        # One match per group; every participant in the group competes in it
+        match_id = conn.execute(
+            "INSERT INTO matches (group_id) VALUES (?) RETURNING id",
+            (group_id,)
+        ).fetchone()["id"]
+        for pid in bucket:
+            conn.execute(
+                "INSERT INTO match_participants (match_id, participant_id) VALUES (?, ?)",
+                (match_id, pid)
+            )
+
+
+def present_individual_score_stage(conn, stage_id: int):
+    """Build and render an individual_score stage for display.
+
+    Returns one group entry per group, each with a ranked participant list
+    (sorted by score descending; unscored participants go last).
+    """
+    event_row = conn.execute(
+        "SELECT e.score_kind FROM event_stages es "
+        "JOIN events e ON e.id = es.event_id WHERE es.id = ?",
+        (stage_id,)
+    ).fetchone()
+    score_kind = event_row["score_kind"] if event_row else "points"
+
+    group_rows = conn.execute(
+        "SELECT id FROM groups WHERE event_stage_id = ? ORDER BY id",
+        (stage_id,)
+    ).fetchall()
+
+    groups = []
+    for idx, grow in enumerate(group_rows):
+        gid = grow["id"]
+
+        match_row = conn.execute(
+            "SELECT id FROM matches WHERE group_id = ? LIMIT 1", (gid,)
+        ).fetchone()
+        match_id = match_row["id"] if match_row else None
+
+        part_rows = conn.execute(
+            "SELECT gp.participant_id, COALESCE(pl.name, t.name) AS display_name, mps.score "
+            "FROM group_participants gp "
+            "JOIN participants p ON p.id = gp.participant_id "
+            "LEFT JOIN players pl ON pl.id = p.player_id "
+            "LEFT JOIN teams t ON t.id = p.team_id "
+            "LEFT JOIN match_participant_scores mps "
+            "  ON mps.match_id = ? AND mps.participant_id = gp.participant_id "
+            "WHERE gp.group_id = ? ORDER BY gp.seed",
+            (match_id, gid)
+        ).fetchall()
+
+        participants = [
+            {"id": r["participant_id"], "name": r["display_name"], "score": r["score"]}
+            for r in part_rows
+        ]
+        ranked = sorted(participants, key=lambda p: (p["score"] is None, -(p["score"] or 0)))
+
+        groups.append({
+            "name": f"Girone {chr(65 + idx)}",
+            "match_id": match_id,
+            "participants": ranked,
+        })
+
+    total_participants = sum(len(g["participants"]) for g in groups)
+
+    advance_row = conn.execute(
+        "SELECT advance_count FROM event_stages WHERE id = ?", (stage_id,)
+    ).fetchone()
+    advance_count = advance_row["advance_count"] if advance_row else None
+
+    return {
+        "groups": groups,
+        "id": stage_id,
+        "total_participants": total_participants,
+        "score_kind": score_kind,
+        "advance_count": advance_count,
+    }
+
+
 def present_groups_stage(conn, stage_id: int):
     """Build and render a groups stage for display."""
 
@@ -575,18 +698,20 @@ def present_single_elimination_stage(conn, stage_id, view_round=0):
 def compute_group_standings(conn, stage_id: int):
     """Compute participant standings within each group, ranked best first.
 
-    For both scoring kinds, rank by wins desc first.
+    For individual_score stages: rank by their single score descending.
+    For groups/round_robin stages, rank by wins desc first.
     - outcome: tiebreak by draws desc
     - points:  tiebreak by total points scored desc
 
     Returns list of {"group_id": int, "ranked_participants": [participant_id, ...]}.
     """
-    event_row = conn.execute(
-        "SELECT e.score_kind FROM event_stages es "
+    stage_row = conn.execute(
+        "SELECT es.kind, e.score_kind FROM event_stages es "
         "JOIN events e ON e.id = es.event_id WHERE es.id = ?",
         (stage_id,)
     ).fetchone()
-    score_kind = event_row["score_kind"] if event_row else "points"
+    stage_kind = stage_row["kind"] if stage_row else "groups"
+    score_kind = stage_row["score_kind"] if stage_row else "points"
 
     group_rows = conn.execute(
         "SELECT id FROM groups WHERE event_stage_id = ? ORDER BY id",
@@ -594,6 +719,33 @@ def compute_group_standings(conn, stage_id: int):
     ).fetchall()
 
     result = []
+
+    if stage_kind == "individual_score":
+        for grow in group_rows:
+            gid = grow["id"]
+            match_row = conn.execute(
+                "SELECT id FROM matches WHERE group_id = ? LIMIT 1", (gid,)
+            ).fetchone()
+            part_rows = conn.execute(
+                "SELECT participant_id FROM group_participants WHERE group_id = ? ORDER BY seed",
+                (gid,)
+            ).fetchall()
+            participant_ids = [r["participant_id"] for r in part_rows]
+            if not match_row:
+                result.append({"group_id": gid, "ranked_participants": participant_ids})
+                continue
+            score_rows = conn.execute(
+                "SELECT participant_id, score FROM match_participant_scores WHERE match_id = ?",
+                (match_row["id"],)
+            ).fetchall()
+            score_map = {r["participant_id"]: r["score"] for r in score_rows}
+            ranked = sorted(
+                participant_ids,
+                key=lambda pid: (score_map.get(pid) is None, -(score_map.get(pid) or 0), pid)
+            )
+            result.append({"group_id": gid, "ranked_participants": ranked})
+        return result
+
     for grow in group_rows:
         gid = grow["id"]
 
@@ -692,5 +844,11 @@ def populate_next_stage_from_groups(conn, stage_id: int) -> bool:
         ).fetchone()["cnt"]
         num_groups = max(1, existing_count) if existing_count > 0 else 1
         generate_groups_stage(conn, next_stage_id, num_groups, participant_ids=qualified_ids)
+    elif next_stage_kind == "individual_score":
+        existing_count = conn.execute(
+            "SELECT COUNT(*) AS cnt FROM groups WHERE event_stage_id = ?", (next_stage_id,)
+        ).fetchone()["cnt"]
+        num_groups = max(1, existing_count) if existing_count > 0 else 1
+        generate_individual_score_stage(conn, next_stage_id, num_groups, participant_ids=qualified_ids)
 
     return True

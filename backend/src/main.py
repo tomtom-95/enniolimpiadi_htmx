@@ -262,7 +262,7 @@ def check_stage_kind_valid(request: Request, stage_id: int, event_id: int):
     row = request.state.conn.execute(
         "SELECT kind FROM event_stages WHERE id = ? AND event_id = ?", (stage_id, event_id)
     ).fetchone()
-    return row and row["kind"] in ("groups", "round_robin")
+    return row and row["kind"] in ("groups", "round_robin", "individual_score")
 
 
 def check_player_in_running_event(request: Request, player_id: int) -> bool:
@@ -693,6 +693,134 @@ async def update_match_score(
         conn.rollback()
 
     return response
+
+
+@app.get("/api/events/{event_id}/matches/{match_id}/individual-score/edit")
+def get_edit_individual_score(
+    request: Request,
+    event_id: int,
+    match_id: int,
+    participant_id: int = Query(...),
+    score_kind: str = Query(...),
+):
+    conn = request.state.conn
+
+    olympiad_badge_ctx = get_olympiad_from_request(request)
+    olympiad_id = olympiad_badge_ctx["id"]
+
+    result = Status.SUCCESS
+    if not check_user_authorized(request, olympiad_id):
+        result = Status.NOT_AUTHORIZED
+
+    html_content, extra_headers = _render_operation_denied(result, olympiad_id, "events")
+
+    if result == Status.SUCCESS:
+        name_row = conn.execute(
+            "SELECT COALESCE(pl.name, t.name) AS name FROM participants p "
+            "LEFT JOIN players pl ON pl.id = p.player_id "
+            "LEFT JOIN teams t ON t.id = p.team_id WHERE p.id = ?",
+            (participant_id,)
+        ).fetchone()
+        participant_name = name_row["name"] if name_row else str(participant_id)
+
+        score_row = conn.execute(
+            "SELECT score FROM match_participant_scores WHERE match_id = ? AND participant_id = ?",
+            (match_id, participant_id)
+        ).fetchone()
+        score = score_row["score"] if score_row else None
+
+        html_content = templates.get_template("edit_individual_score.html").render(
+            event_id=event_id,
+            match_id=match_id,
+            participant_id=participant_id,
+            participant_name=participant_name,
+            score_kind=score_kind,
+            score=score,
+        )
+
+    response = HTMLResponse(html_content)
+    response.headers.update(extra_headers)
+    return response
+
+
+@app.put("/api/events/{event_id}/matches/{match_id}/individual-score")
+async def update_individual_score(
+    request: Request,
+    event_id: int,
+    match_id: int,
+    participant_id: int = Form(...),
+    score: int = Form(...),
+    score_kind: str = Form(...),
+):
+    conn = request.state.conn
+
+    olympiad_badge_ctx = get_olympiad_from_request(request)
+    olympiad_id = olympiad_badge_ctx["id"]
+
+    conn.execute("BEGIN IMMEDIATE")
+
+    result = Status.SUCCESS
+    if not check_user_authorized(request, olympiad_id):
+        result = Status.NOT_AUTHORIZED
+
+    html_content, extra_headers = _render_operation_denied(result, olympiad_id, "events")
+
+    if result == Status.SUCCESS:
+        conn.execute(
+            "INSERT INTO match_participant_scores (match_id, participant_id, score) VALUES (?, ?, ?) "
+            "ON CONFLICT (match_id, participant_id) DO UPDATE SET score = excluded.score",
+            (match_id, participant_id, score)
+        )
+
+        stage_row = conn.execute(
+            "SELECT g.event_stage_id FROM matches m "
+            "JOIN groups g ON g.id = m.group_id "
+            "WHERE m.id = ?",
+            (match_id,)
+        ).fetchone()
+        stage_id = stage_row["event_stage_id"]
+
+        new_event_version = conn.execute(
+            "UPDATE events SET version = version + 1 WHERE id = ? RETURNING version",
+            (event_id,)
+        ).fetchone()["version"]
+
+        notify_event(event_id, "score-update")
+
+        stage = events.present_individual_score_stage(conn, stage_id)
+        html_content = render_event_fragment(
+            "stage_individual_score_inner",
+            stage=stage,
+            event_id=event_id,
+            event_version=new_event_version,
+        )
+        extra_headers["HX-Retarget"] = "#stage-individual-score-inner"
+        extra_headers["HX-Reswap"] = "outerHTML"
+
+    response = HTMLResponse(html_content)
+    response.headers.update(extra_headers)
+
+    if result == Status.SUCCESS:
+        conn.commit()
+    else:
+        conn.rollback()
+
+    return response
+
+
+@app.get("/api/events/{event_id}/stages/{stage_id}/individual-score-content")
+def get_stage_individual_score_content(request: Request, event_id: int, stage_id: int):
+    conn = request.state.conn
+    stage = events.present_individual_score_stage(conn, stage_id)
+    event_version = conn.execute(
+        "SELECT version FROM events WHERE id = ?", (event_id,)
+    ).fetchone()["version"]
+    return HTMLResponse(render_event_fragment(
+        "stage_individual_score_inner",
+        stage=stage,
+        event_id=event_id,
+        event_version=event_version,
+    ))
 
 
 @app.get("/api/events/{event_id}/stages/{stage_id}/bracket-content")
@@ -1333,6 +1461,8 @@ def _get_stage_ctx(conn, event_id: int, stage_order: int) -> dict:
 
     if stage_kind == "groups":
         stage = events.present_groups_stage(conn, stage_id)
+    elif stage_kind == "individual_score":
+        stage = events.present_individual_score_stage(conn, stage_id)
     elif stage_kind == "single_elimination":
         stage = events.present_single_elimination_stage(conn, stage_id)
     else:
@@ -1512,12 +1642,14 @@ def get_event_stage(request: Request, event_id: int, stage_order: int):
 
         if stage_kind == "groups":
             stage = events.present_groups_stage(conn, stage_id)
+        elif stage_kind == "individual_score":
+            stage = events.present_individual_score_stage(conn, stage_id)
         elif stage_kind == "round_robin":
             html_content = "<div class='error-banner'>Fase non trovata</div>"
         elif stage_kind == "single_elimination":
             stage = events.present_single_elimination_stage(conn, stage_id, view_round=0)
 
-        if stage_kind != "round_robin":
+        if stage_kind not in ("round_robin",):
             stage["name"] = stage_label
             html_content = render_event_fragment(
                 "stage_content",
@@ -1572,6 +1704,8 @@ def go_to_next_stage(request: Request, event_id: int, stage_order: int):
 
     if next_stage_kind == "groups":
         stage = events.present_groups_stage(conn, next_stage_id)
+    elif next_stage_kind == "individual_score":
+        stage = events.present_individual_score_stage(conn, next_stage_id)
     elif next_stage_kind == "single_elimination":
         stage = events.present_single_elimination_stage(conn, next_stage_id, view_round=0)
     else:
@@ -1608,12 +1742,22 @@ def resize_stage_groups(request: Request, event_id: int, stage_id: int, num_grou
     html_content, extra_headers = _render_operation_denied(result, olympiad_id, "events")
 
     if result == Status.SUCCESS:
-        events.generate_groups_stage(conn, stage_id, num_groups)
+        stage_kind_row = conn.execute(
+            "SELECT kind FROM event_stages WHERE id = ?", (stage_id,)
+        ).fetchone()
+        stage_kind = stage_kind_row["kind"] if stage_kind_row else "groups"
+
+        if stage_kind == "individual_score":
+            events.generate_individual_score_stage(conn, stage_id, num_groups)
+            stage = events.present_individual_score_stage(conn, stage_id)
+        else:
+            events.generate_groups_stage(conn, stage_id, num_groups)
+            stage = events.present_groups_stage(conn, stage_id)
+
         new_version = conn.execute(
             "UPDATE events SET version = version + 1 WHERE id = ? RETURNING version",
             (event_id,)
         ).fetchone()["version"]
-        stage = events.present_groups_stage(conn, stage_id)
         html_content = render_event_fragment(
             "stage_groups_content",
             stage=stage,
@@ -1712,6 +1856,8 @@ def update_stage_kind(request: Request, event_id: int, stage_id: int, kind: str 
         if stage_order == 1:
             if kind == "groups":
                 events.generate_groups_stage(conn, new_id, 1)
+            elif kind == "individual_score":
+                events.generate_individual_score_stage(conn, new_id, 1)
             elif kind == "single_elimination":
                 events.generate_single_elimination_stage(conn, new_id)
 
@@ -2039,6 +2185,8 @@ def add_event_stage(request: Request, event_id: int):
         if stage_order == 1:
             if stage_kind == "groups":
                 events.generate_groups_stage(conn, stage_id, 1)
+            elif stage_kind == "individual_score":
+                events.generate_individual_score_stage(conn, stage_id, 1)
             elif stage_kind == "single_elimination":
                 events.generate_single_elimination_stage(conn, stage_id)
 
@@ -2091,6 +2239,9 @@ def remove_event_stage(request: Request, event_id: int, stage_id: int):
                 if stage_kind == "groups":
                     groups = conn.execute("SELECT id FROM groups WHERE event_stage_id = ?", (stage_id,)).fetchall()
                     events.generate_groups_stage(conn, stage_id, len(groups))
+                elif stage_kind == "individual_score":
+                    groups = conn.execute("SELECT id FROM groups WHERE event_stage_id = ?", (stage_id,)).fetchall()
+                    events.generate_individual_score_stage(conn, stage_id, max(1, len(groups)))
                 elif stage_kind == "single_elimination":
                     events.generate_single_elimination_stage(conn, stage_id)
 
@@ -2214,6 +2365,11 @@ def enroll_participant(request: Request, event_id: int, participant_id: int):
                     "SELECT id FROM groups WHERE event_stage_id = ?", (stage_id,)
                 ).fetchall()
                 events.generate_groups_stage(conn, stage_id, len(groups))
+            elif stage_kind == "individual_score":
+                groups = conn.execute(
+                    "SELECT id FROM groups WHERE event_stage_id = ?", (stage_id,)
+                ).fetchall()
+                events.generate_individual_score_stage(conn, stage_id, max(1, len(groups)))
             elif stage_kind == "single_elimination":
                 events.generate_single_elimination_stage(conn, stage_id)
 
@@ -2279,6 +2435,11 @@ def unenroll_participant(request: Request, event_id: int, participant_id: int):
                     "SELECT id FROM groups WHERE event_stage_id = ?", (stage_id,)
                 ).fetchall()
                 events.generate_groups_stage(conn, stage_id, len(groups))
+            elif stage_kind == "individual_score":
+                groups = conn.execute(
+                    "SELECT id FROM groups WHERE event_stage_id = ?", (stage_id,)
+                ).fetchall()
+                events.generate_individual_score_stage(conn, stage_id, max(1, len(groups)))
             elif stage_kind == "single_elimination":
                 events.generate_single_elimination_stage(conn, stage_id)
 

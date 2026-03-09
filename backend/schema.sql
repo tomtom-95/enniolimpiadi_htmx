@@ -77,12 +77,13 @@ CREATE TABLE stage_kinds (
 INSERT INTO stage_kinds (kind, label) VALUES
     ('groups', 'Fase a Gironi'),
     ('round_robin', 'Girone Unico'),
-    ('single_elimination', 'Eliminazione Diretta');
+    ('single_elimination', 'Eliminazione Diretta'),
+    ('individual_score', 'Punteggio Individuale');
 
 CREATE TABLE event_stages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
-    kind TEXT NOT NULL REFERENCES stage_kinds(kind) CHECK(kind IN ('groups', 'round_robin', 'single_elimination')),
+    kind TEXT NOT NULL REFERENCES stage_kinds(kind) CHECK(kind IN ('groups', 'round_robin', 'single_elimination', 'individual_score')),
     stage_order INTEGER NOT NULL,
     advance_count INTEGER, -- null for final stage
     version INTEGER NOT NULL DEFAULT 1,

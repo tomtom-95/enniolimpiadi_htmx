@@ -1361,6 +1361,57 @@ html.slide-back::view-transition-new(stage-slide) {
     background: none;
 }
 
+/*
+ * Individual score stage — leaderboard rows
+ */
+.individual-score-list {
+    padding: 0 0 0.5rem;
+}
+
+.group-card.collapsed .individual-score-list {
+    display: none;
+}
+
+.individual-score-row {
+    display: grid;
+    grid-template-columns: 2rem 1fr auto;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.55rem 1rem;
+    cursor: pointer;
+    transition: background-color 0.15s;
+    border-top: 1px solid #f0eef8;
+}
+
+.individual-score-row:hover {
+    background-color: #f7f5ff;
+}
+
+.individual-score-rank {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #9b8fc4;
+    text-align: center;
+}
+
+.individual-score-name {
+    font-size: 0.95rem;
+    color: #2d2a4a;
+}
+
+.individual-score-value {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #2d2a4a;
+    min-width: 2.5rem;
+    text-align: right;
+}
+
+.individual-score-value.no-score {
+    color: #bbb;
+    font-weight: 400;
+}
+
 .score-modal-inputs {
     display: flex;
     align-items: center;

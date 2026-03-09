@@ -168,8 +168,8 @@
                                                         <span class="stage-kind-arrow">&#9660;</span>
                                                     </button>
                                                 </div>
-                                                {# Groups-only: +/- control for number of groups #}
-                                                {% if stage.kind == 'groups' %}
+                                                {# Groups and individual_score: +/- control for number of groups #}
+                                                {% if stage.kind in ('groups', 'individual_score') %}
                                                     <div class="stage-groups-setup">
                                                         <span class="stage-groups-setup-label">Gironi</span>
                                                         <div class="group-resize-controls">
@@ -214,7 +214,7 @@
                                                             </div>
                                                         </div>
                                                     {% endif %}
-                                                {% endif %} {# stage.kind == 'groups' #}
+                                                {% endif %} {# stage.kind in groups/individual_score #}
                                                 <button class="btn-remove-stage"
                                                         hx-delete="/api/events/{{ event_id }}/stages/{{ stage.id }}"
                                                         hx-target="#stages-setup-section"
@@ -338,7 +338,7 @@
                             {% endif %} {# stage_order > 1 #}
                         <span class="stage-indicator">{{ stage.name }} ({{ stage_order }}/{{ total_stages }})</span>
                         {% if stage_order < total_stages %}
-                            {% if stage_kind == "groups" and stage.advance_count %}
+                            {% if stage_kind in ("groups", "individual_score") and stage.advance_count %}
                                 <button class="stage-arrow"
                                         hx-post="/api/events/{{ event_id }}/stage/{{ stage_order }}/go-next"
                                         hx-target="#stage-content"
@@ -433,6 +433,57 @@
                                     {% endblock %} {# stage_groups_inner #}
                                 </div>
                             {% endblock %} {# stage_groups_content #}
+
+                        {% elif stage_kind == "individual_score" %}
+
+                            {#
+                                BLOCK: stage_individual_score_content / stage_individual_score_inner
+                                Individual score stage: one leaderboard per group.
+                                The inner div listens for SSE "score-update" and reloads itself.
+                                Clicking a row opens a score-edit modal for that participant.
+                            #}
+                            {% block stage_individual_score_content %}
+                                <div id="stage-individual-score-content">
+                                    {% if stage.advance_count and stage_order < total_stages %}
+                                        <div class="stage-advance-info">
+                                            Le prime {{ stage.advance_count }} per girone avanzano alla fase successiva
+                                        </div>
+                                    {% endif %}
+                                    {% block stage_individual_score_inner %}
+                                        <div id="stage-individual-score-inner"
+                                             hx-trigger="sse:score-update"
+                                             hx-get="/api/events/{{ event_id }}/stages/{{ stage.id }}/individual-score-content"
+                                             hx-swap="outerHTML"
+                                             hx-target="this">
+                                            <div class="stage-groups">
+                                                {% for group in stage.groups %}
+                                                    <div class="group-card">
+                                                        <div class="group-header"
+                                                             _="on click toggle .collapsed on closest .group-card">
+                                                            <h4>{{ group.name }}</h4>
+                                                            <span class="group-toggle">&#9662;</span>
+                                                        </div>
+                                                        <div class="individual-score-list">
+                                                            {% for participant in group.participants %}
+                                                                <div class="individual-score-row"
+                                                                     hx-get="/api/events/{{ event_id }}/matches/{{ group.match_id }}/individual-score/edit?participant_id={{ participant.id }}&score_kind={{ stage.score_kind }}"
+                                                                     hx-target="#modal-container"
+                                                                     hx-swap="innerHTML">
+                                                                    <span class="individual-score-rank">{{ loop.index }}</span>
+                                                                    <span class="individual-score-name">{{ participant.name }}</span>
+                                                                    <span class="individual-score-value{% if participant.score is none %} no-score{% endif %}">
+                                                                        {{ participant.score if participant.score is not none else '—' }}
+                                                                    </span>
+                                                                </div>
+                                                            {% endfor %}
+                                                        </div>
+                                                    </div>
+                                                {% endfor %}
+                                            </div>
+                                        </div>
+                                    {% endblock %} {# stage_individual_score_inner #}
+                                </div>
+                            {% endblock %} {# stage_individual_score_content #}
 
                         {% elif stage_kind == "single_elimination" %}
 

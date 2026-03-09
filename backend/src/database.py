@@ -99,7 +99,7 @@ def seed_dummy_data(db_path: Path):
         ]
         conn.executemany("INSERT INTO events (olympiad_id, name, score_kind) VALUES (?, ?, ?)", _events)
 
-        # Create event stages
+        # Create event stages for Event1
         conn.execute(
             "INSERT INTO event_stages (event_id, kind, stage_order) VALUES (?, ?, ?)",
             (1, "groups", 1)
@@ -107,6 +107,12 @@ def seed_dummy_data(db_path: Path):
         conn.execute(
             "INSERT INTO event_stages (event_id, kind, stage_order) VALUES (?, ?, ?)",
             (1, "single_elimination", 2)
+        )
+
+        # Create event stage for Event2 (individual_score)
+        conn.execute(
+            "INSERT INTO event_stages (event_id, kind, stage_order) VALUES (?, ?, ?)",
+            (2, "individual_score", 1)
         )
 
         # Now I must create participants with team_id = NULL (they are just player)
@@ -122,6 +128,13 @@ def seed_dummy_data(db_path: Path):
 
         # Groups stage (event_stage_id=1): 2 groups of 8
         events.generate_groups_stage(conn, stage_id=1, num_groups=2)
+
+        # Enroll participants 1-8 in Event2
+        for pid in participants[:8]:
+            conn.execute("INSERT INTO event_participants (event_id, participant_id) VALUES (?, ?)", (2, pid))
+
+        # Individual score stage (event_stage_id=3): 2 groups of 4
+        events.generate_individual_score_stage(conn, stage_id=3, num_groups=2)
 
         conn.commit()
     finally:
