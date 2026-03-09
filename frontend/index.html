@@ -11,7 +11,8 @@
     </head>
     <body>
         <div class="top-bar">
-            <div class="hamburger">
+            <div class="hamburger"
+                _="on mousedown toggle .is-active toggle .is-collapsed on .side-menu toggle .is-visible on .side-menu-overlay">
                 <div class="hamburger-box">
                     <div class="hamburger-inner"></div>
                 </div>
@@ -25,12 +26,14 @@
         </div>
         <div class="content-area">
             <div class="side-menu is-collapsed">
-                <ul>
+                <ul _="on click if no <.side-menu.is-collapsed/> toggle .is-active on .hamburger toggle .is-collapsed on .side-menu toggle .is-visible on .side-menu-overlay end">
                     <li hx-get="api/olympiads" hx-trigger="click" hx-target="#main-content">Olimpiadi</li>
                     <li hx-get="api/events" hx-trigger="click" hx-target="#main-content">Eventi</li>
                     <li hx-get="api/players" hx-trigger="click" hx-target="#main-content">Giocatori</li>
                 </ul>
             </div>
+            <div class="side-menu-overlay"
+                _="on mousedown toggle .is-active on .hamburger toggle .is-collapsed on .side-menu toggle .is-visible on me"></div>
             <div id="main-content">
                 A presentation page
             </div>
@@ -38,11 +41,6 @@
         <div id="modal-container"></div>
     </body>
 <script>
-    document.querySelector('.hamburger').addEventListener('mousedown', function() {
-        this.classList.toggle('is-active');
-        document.querySelector('.side-menu').classList.toggle('is-collapsed');
-    });
-
     document.body.addEventListener('htmx:configRequest', function(evt) {
         const badge = document.getElementById('olympiad-badge');
         evt.detail.headers['X-Olympiad-Id'] = badge.dataset.id;
