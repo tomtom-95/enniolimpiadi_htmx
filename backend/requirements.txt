@@ -5,3 +5,4 @@ jinja2-fragments==1.11.0
 pytest==8.3.4
 httpx==0.27.0
 python-multipart==0.0.9
+djlint==1.36.4

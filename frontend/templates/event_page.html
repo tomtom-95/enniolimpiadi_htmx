@@ -88,9 +88,7 @@
             ------------------------------------------------------------
         #}
         <div id="event-section-content" class="event-layout">
-
             {% if event_status == "registration" %}
-
                 {#
                     ............................................................
                     BLOCK: event_setup
@@ -147,7 +145,9 @@
                                     </summary>
                                     <div class="stage-setup-pipeline">
                                         {% for stage in stages %}
-                                            {% if not loop.first %}<div class="stage-setup-arrow">&#8595;</div>{% endif %}
+                                            {% if not loop.first %}
+                                                <div class="stage-setup-arrow">&#8595;</div>
+                                            {% endif %}
                                             <div class="stage-setup-card">
                                                 <div class="stage-setup-card-header">
                                                     <span class="stage-setup-num">Fase {{ stage.stage_order }}</span>
@@ -331,221 +331,237 @@
                             {% else %}
                                 <button class="stage-arrow" disabled>&#8592;</button>
                             {% endif %} {# stage_order > 1 #}
-                        <span class="stage-indicator">{{ stage.name }} ({{ stage_order }}/{{ total_stages }})</span>
-                        {% if stage_order < total_stages %}
-                            {% if stage_kind in ("groups", "individual_score") and stage.advance_count %}
-                                <button class="stage-arrow"
-                                        hx-post="/api/events/{{ event_id }}/stage/{{ stage_order }}/go-next"
-                                        hx-target="#stage-content"
-                                        hx-swap="outerHTML transition:true"
-                                        _="on click add .animating-stage to <html/> remove .animating-bracket from <html/> remove .slide-back from <html/>">&#8594;</button>
+                            <span class="stage-indicator">{{ stage.name }} ({{ stage_order }}/{{ total_stages }})</span>
+                            {% if stage_order < total_stages %}
+                                {% if stage_kind in ("groups", "individual_score") and stage.advance_count %}
+                                    <button class="stage-arrow"
+                                            hx-post="/api/events/{{ event_id }}/stage/{{ stage_order }}/go-next"
+                                            hx-target="#stage-content"
+                                            hx-swap="outerHTML transition:true"
+                                            _="on click add .animating-stage to <html/> remove .animating-bracket from <html/> remove .slide-back from <html/>">&#8594;</button>
+                                {% else %}
+                                    <button class="stage-arrow"
+                                            hx-get="/api/events/{{ event_id }}/stage/{{ stage_order + 1 }}"
+                                            hx-target="#stage-content"
+                                            hx-swap="outerHTML transition:true"
+                                            _="on click add .animating-stage to <html/> remove .animating-bracket from <html/> remove .slide-back from <html/>">&#8594;</button>
+                                {% endif %}
                             {% else %}
-                                <button class="stage-arrow"
-                                        hx-get="/api/events/{{ event_id }}/stage/{{ stage_order + 1 }}"
-                                        hx-target="#stage-content"
-                                        hx-swap="outerHTML transition:true"
-                                        _="on click add .animating-stage to <html/> remove .animating-bracket from <html/> remove .slide-back from <html/>">&#8594;</button>
-                            {% endif %}
-                        {% else %}
-                            <button class="stage-arrow" disabled>&#8594;</button>
-                        {% endif %} {# stage_order < total_stages #}
-                    </div>
+                                <button class="stage-arrow" disabled>&#8594;</button>
+                            {% endif %} {# stage_order < total_stages #}
+                        </div>
 
-                    {# Stage body: render groups grid or elimination bracket #}
-                    <div class="stage-body">
-                        {% if stage_kind == "groups" %}
-
-                            {#
-                                BLOCK: stage_groups_content / stage_groups_inner
-                                Groups stage: a score grid per group.
-                                The inner div listens for SSE "score-update" and
-                                reloads itself so scores refresh in real time.
-                                Clicking a cell opens a score-edit modal via OOB.
-                            #}
-                            {% block stage_groups_content %}
-                                <div id="stage-groups-content">
-                                    {% if stage.advance_count and stage_order < total_stages %}
-                                        <div class="stage-advance-info">
-                                            Le prime {{ stage.advance_count }} per girone avanzano alla fase successiva
-                                        </div>
-                                    {% endif %}
-                                    {% block stage_groups_inner %}
-                                        <div id="stage-groups-inner"
-                                             hx-trigger="sse:score-update"
-                                             hx-get="/api/events/{{ event_id }}/stages/{{ stage.id }}/groups-content"
-                                             hx-swap="outerHTML"
-                                             hx-target="this">
-                                            <div class="stage-groups">
-                                                {% for group in stage.groups %}
-                                                    <div class="group-card">
-                                                        <div class="group-header"
-                                                             _="on click toggle .collapsed on closest .group-card">
-                                                            <h4>{{ group.name }}</h4>
-                                                            <span class="group-toggle">&#9662;</span>
-                                                        </div>
-                                                        {% set ps = group.participants %}
-                                                        {% set n = ps | length %}
-                                                        {# Score grid: rows = ps[i] (row labels), cols = ps[j] (col headers) #}
-                                                        <div class="group-grid-wrap">
-                                                            <div class="grid-row-labels">
-                                                                <div class="grid-col-header-spacer"></div>
-                                                                {% for i in range(0, n) %}<div class="grid-row-header">{{ ps[i] }}</div>{% endfor %}
+                        {# Stage body: render groups grid or elimination bracket #}
+                        <div class="stage-body">
+                            {% if stage_kind == "groups" %}
+                                {#
+                                    BLOCK: stage_groups_content / stage_groups_inner
+                                    Groups stage: a score grid per group.
+                                    The inner div listens for SSE "score-update" and
+                                    reloads itself so scores refresh in real time.
+                                    Clicking a cell opens a score-edit modal via OOB.
+                                #}
+                                {% block stage_groups_content %}
+                                    <div id="stage-groups-content">
+                                        {% if stage.advance_count and stage_order < total_stages %}
+                                            <div class="stage-advance-info">
+                                                Le prime {{ stage.advance_count }} per girone avanzano alla fase successiva
+                                            </div>
+                                        {% endif %}
+                                        {% block stage_groups_inner %}
+                                            <div id="stage-groups-inner"
+                                                hx-trigger="sse:score-update"
+                                                hx-get="/api/events/{{ event_id }}/stages/{{ stage.id }}/groups-content"
+                                                hx-swap="outerHTML"
+                                                hx-target="this">
+                                                <div class="stage-groups">
+                                                    {% for group in stage.groups %}
+                                                        <div class="group-card">
+                                                            <div class="group-header"
+                                                                _="on click toggle .collapsed on closest .group-card">
+                                                                <h4>{{ group.name }}</h4>
+                                                                <span class="group-toggle">&#9662;</span>
                                                             </div>
-                                                            <div class="grid-scroll">
-                                                                <div class="grid-scores"
-                                                                     style="grid-template-columns: repeat({{ n }}, 1fr)">
-                                                                    {% for j in range(0, n) %}<div class="grid-col-header">{{ ps[j] }}</div>{% endfor %}
-                                                                    {# Cell logic: diagonal = X, upper triangle = score cell, lower = empty #}
-                                                                    {% for i in range(0, n) %}
-                                                                        {% for j in range(0, n) %}
-                                                                            {% if i == j %}
-                                                                                <div class="grid-cell self">&#10005;</div>
-                                                                            {% elif j > i %}
-                                                                                {% set match_info = group.scores.get(ps[i], {}).get(ps[j]) %}
-                                                                                {% if match_info %}
-                                                                                    <div id="score-cell-{{ match_info.match_id }}"
-                                                                                         class="grid-cell{% if match_info.score %} has-score{% endif %}"
-                                                                                         hx-get="/api/events/{{ event_id }}/matches/{{ match_info.match_id }}/score/edit?p1_id={{ match_info.p1_id }}&p2_id={{ match_info.p2_id }}"
-                                                                                         hx-target="#modal-container"
-                                                                                         hx-swap="innerHTML">
-                                                                                        {{ match_info.score or '-' }}
-                                                                                    </div>
+                                                            {% set ps = group.participants %}
+                                                            {% set n = ps | length %}
+                                                            {# Score grid: rows = ps[i] (row labels), cols = ps[j] (col headers) #}
+                                                            <div class="group-grid-wrap">
+                                                                <div class="grid-row-labels">
+                                                                    <div class="grid-col-header-spacer"></div>
+                                                                    {% for i in range(0, n) %}<div class="grid-row-header">{{ ps[i] }}</div>{% endfor %}
+                                                                </div>
+                                                                <div class="grid-scroll">
+                                                                    <div class="grid-scores"
+                                                                        style="grid-template-columns: repeat({{ n }}, 1fr)">
+                                                                        {% for j in range(0, n) %}<div class="grid-col-header">{{ ps[j] }}</div>{% endfor %}
+                                                                        {# Cell logic: diagonal = X, upper triangle = score cell, lower = empty #}
+                                                                        {% for i in range(0, n) %}
+                                                                            {% for j in range(0, n) %}
+                                                                                {% if i == j %}
+                                                                                    <div class="grid-cell self">&#10005;</div>
+                                                                                {% elif j > i %}
+                                                                                    {% set match_info = group.scores.get(ps[i], {}).get(ps[j]) %}
+                                                                                    {% if match_info %}
+                                                                                        <div id="score-cell-{{ match_info.match_id }}"
+                                                                                            class="grid-cell{% if match_info.score %} has-score{% endif %}"
+                                                                                            hx-get="/api/events/{{ event_id }}/matches/{{ match_info.match_id }}/score/edit?p1_id={{ match_info.p1_id }}&p2_id={{ match_info.p2_id }}"
+                                                                                            hx-target="#modal-container"
+                                                                                            hx-swap="innerHTML">
+                                                                                            {{ match_info.score or '-' }}
+                                                                                        </div>
+                                                                                    {% else %}
+                                                                                        <div class="grid-cell">-</div>
+                                                                                    {% endif %} {# match_info #}
                                                                                 {% else %}
-                                                                                    <div class="grid-cell">-</div>
-                                                                                {% endif %} {# match_info #}
-                                                                            {% else %}
-                                                                                <div class="grid-cell empty"></div>
-                                                                            {% endif %} {# i == j / j > i #}
-                                                                        {% endfor %} {# for j #}
-                                                                    {% endfor %} {# for i #}
+                                                                                    <div class="grid-cell empty"></div>
+                                                                                {% endif %} {# i == j / j > i #}
+                                                                            {% endfor %} {# for j #}
+                                                                        {% endfor %} {# for i #}
+                                                                    </div>
                                                                 </div>
                                                             </div>
                                                         </div>
-                                                    </div>
-                                                {% endfor %} {# for group #}
-                                            </div>
-                                        </div>
-                                    {% endblock %} {# stage_groups_inner #}
-                                </div>
-                            {% endblock %} {# stage_groups_content #}
-
-                        {% elif stage_kind == "individual_score" %}
-
-                            {#
-                                BLOCK: stage_individual_score_content / stage_individual_score_inner
-                                Individual score stage: one leaderboard per group.
-                                The inner div listens for SSE "score-update" and reloads itself.
-                                Clicking a row opens a score-edit modal for that participant.
-                            #}
-                            {% block stage_individual_score_content %}
-                                <div id="stage-individual-score-content">
-                                    {% if stage.advance_count and stage_order < total_stages %}
-                                        <div class="stage-advance-info">
-                                            Le prime {{ stage.advance_count }} per girone avanzano alla fase successiva
-                                        </div>
-                                    {% endif %}
-                                    {% block stage_individual_score_inner %}
-                                        <div id="stage-individual-score-inner"
-                                             hx-trigger="sse:score-update"
-                                             hx-get="/api/events/{{ event_id }}/stages/{{ stage.id }}/individual-score-content"
-                                             hx-swap="outerHTML"
-                                             hx-target="this">
-                                            <div class="stage-groups">
-                                                {% for group in stage.groups %}
-                                                    <div class="group-card">
-                                                        <div class="group-header"
-                                                             _="on click toggle .collapsed on closest .group-card">
-                                                            <h4>{{ group.name }}</h4>
-                                                            <span class="group-toggle">&#9662;</span>
-                                                        </div>
-                                                        <div class="individual-score-list">
-                                                            {% for participant in group.participants %}
-                                                                <div class="individual-score-row"
-                                                                     hx-get="/api/events/{{ event_id }}/matches/{{ group.match_id }}/individual-score/edit?participant_id={{ participant.id }}"
-                                                                     hx-target="#modal-container"
-                                                                     hx-swap="innerHTML">
-                                                                    <span class="individual-score-rank">{{ loop.index }}</span>
-                                                                    <span class="individual-score-name">{{ participant.name }}</span>
-                                                                    <span class="individual-score-value{% if participant.score is none %} no-score{% endif %}">
-                                                                        {{ participant.score if participant.score is not none else '—' }}
-                                                                    </span>
-                                                                </div>
-                                                            {% endfor %}
-                                                        </div>
-                                                    </div>
-                                                {% endfor %}
-                                            </div>
-                                        </div>
-                                    {% endblock %} {# stage_individual_score_inner #}
-                                </div>
-                            {% endblock %} {# stage_individual_score_content #}
-
-                        {% elif stage_kind == "single_elimination" %}
-
-                            {#
-                                BLOCK: stage_bracket_content / stage_bracket_inner
-                                Single-elimination bracket: matches laid out on a CSS grid.
-                                row_start is computed so that matches align correctly across
-                                rounds (each round doubles the row span).
-                                Clickable matches open a score-edit modal.
-                            #}
-                            {% block stage_bracket_content %}
-                                <div id="stage-bracket-content">
-                                    {% block stage_bracket_inner %}
-                                        <div id="stage-bracket-inner"
-                                             hx-trigger="sse:score-update"
-                                             hx-get="/api/events/{{ event_id }}/stages/{{ stage.id }}/bracket-content?view_round={{ stage.view_round }}"
-                                             hx-target="this"
-                                             hx-swap="outerHTML">
-                                            {% set rounds = stage.rounds %}
-                                            {% if rounds %}
-                                                <div class="bracket-nav">
-                                                    {% if stage.has_prev %}
-                                                        <button class="bracket-nav-btn"
-                                                                hx-get="/api/events/{{ event_id }}/stages/{{ stage.id }}/bracket-content?view_round={{ stage.view_round - 1 }}"
-                                                                hx-target="#stage-bracket-inner"
-                                                                hx-swap="outerHTML transition:true"
-                                                                _="on click add .animating-bracket to <html/> remove .animating-stage from <html/> add .slide-back to <html/>">&#8592;</button>
-                                                    {% else %}
-                                                        <span class="bracket-nav-btn bracket-nav-disabled"></span>
-                                                    {% endif %}
-                                                    <span class="bracket-nav-label">{{ stage.view_round + 1 }} / {{ stage.total_rounds }}</span>
-                                                    {% if stage.has_next %}
-                                                        <button class="bracket-nav-btn"
-                                                                hx-get="/api/events/{{ event_id }}/stages/{{ stage.id }}/bracket-content?view_round={{ stage.view_round + 1 }}"
-                                                                hx-target="#stage-bracket-inner"
-                                                                hx-swap="outerHTML transition:true"
-                                                                _="on click add .animating-bracket to <html/> remove .animating-stage from <html/> remove .slide-back from <html/>">&#8594;</button>
-                                                    {% else %}
-                                                        <span class="bracket-nav-btn bracket-nav-disabled"></span>
-                                                    {% endif %}
+                                                    {% endfor %} {# for group #}
                                                 </div>
-                                                <div class="stage-bracket"
-                                                     style="grid-template-columns: repeat({{ rounds | length }}, 1fr);
-                                                            grid-template-rows: repeat({{ stage.total_rows }}, 1fr)">
-                                                    {% for round in rounds %}
-                                                        {% set col = loop.index %}
-                                                        {% for match in round.matches %}
-                                                            {% set m = loop.index0 %}
-                                                            {# col 1 (parent): cards stacked, each 2 rows. col 2 (child): centred between its two parents. #}
-                                                            {% if col == 1 %}
-                                                                {% set row_start = m * 2 + 1 %}
-                                                            {% else %}
-                                                                {% set row_start = m * 4 + 2 %}
-                                                            {% endif %}
-                                                            {# Clickable matches (both players known) open the score modal #}
-                                                            {% if match.clickable %}
-                                                                <div class="bracket-match clickable"
+                                            </div>
+                                        {% endblock %} {# stage_groups_inner #}
+                                    </div>
+                                {% endblock %} {# stage_groups_content #}
+
+                            {% elif stage_kind == "individual_score" %}
+
+                                {#
+                                    BLOCK: stage_individual_score_content / stage_individual_score_inner
+                                    Individual score stage: one leaderboard per group.
+                                    The inner div listens for SSE "score-update" and reloads itself.
+                                    Clicking a row opens a score-edit modal for that participant.
+                                #}
+                                {% block stage_individual_score_content %}
+                                    <div id="stage-individual-score-content">
+                                        {% if stage.advance_count and stage_order < total_stages %}
+                                            <div class="stage-advance-info">
+                                                Le prime {{ stage.advance_count }} per girone avanzano alla fase successiva
+                                            </div>
+                                        {% endif %}
+                                        {% block stage_individual_score_inner %}
+                                            <div id="stage-individual-score-inner"
+                                                hx-trigger="sse:score-update"
+                                                hx-get="/api/events/{{ event_id }}/stages/{{ stage.id }}/individual-score-content"
+                                                hx-swap="outerHTML"
+                                                hx-target="this">
+                                                <div class="stage-groups">
+                                                    {% for group in stage.groups %}
+                                                        <div class="group-card">
+                                                            <div class="group-header"
+                                                                _="on click toggle .collapsed on closest .group-card">
+                                                                <h4>{{ group.name }}</h4>
+                                                                <span class="group-toggle">&#9662;</span>
+                                                            </div>
+                                                            <div class="individual-score-list">
+                                                                {% for participant in group.participants %}
+                                                                    <div class="individual-score-row"
+                                                                        hx-get="/api/events/{{ event_id }}/matches/{{ group.match_id }}/individual-score/edit?participant_id={{ participant.id }}"
+                                                                        hx-target="#modal-container"
+                                                                        hx-swap="innerHTML">
+                                                                        <span class="individual-score-rank">{{ loop.index }}</span>
+                                                                        <span class="individual-score-name">{{ participant.name }}</span>
+                                                                        <span class="individual-score-value{% if participant.score is none %} no-score{% endif %}">
+                                                                            {{ participant.score if participant.score is not none else '—' }}
+                                                                        </span>
+                                                                    </div>
+                                                                {% endfor %}
+                                                            </div>
+                                                        </div>
+                                                    {% endfor %}
+                                                </div>
+                                            </div>
+                                        {% endblock %} {# stage_individual_score_inner #}
+                                    </div>
+                                {% endblock %} {# stage_individual_score_content #}
+
+                            {% elif stage_kind == "single_elimination" %}
+
+                                {#
+                                    BLOCK: stage_bracket_content / stage_bracket_inner
+                                    Single-elimination bracket: matches laid out on a CSS grid.
+                                    row_start is computed so that matches align correctly across
+                                    rounds (each round doubles the row span).
+                                    Clickable matches open a score-edit modal.
+                                #}
+                                {% block stage_bracket_content %}
+                                    <div id="stage-bracket-content">
+                                        {% block stage_bracket_inner %}
+                                            <div id="stage-bracket-inner"
+                                                hx-trigger="sse:score-update"
+                                                hx-get="/api/events/{{ event_id }}/stages/{{ stage.id }}/bracket-content?view_round={{ stage.view_round }}"
+                                                hx-target="this"
+                                                hx-swap="outerHTML">
+                                                {% set rounds = stage.rounds %}
+                                                {% if rounds %}
+                                                    <div class="bracket-nav">
+                                                        {% if stage.has_prev %}
+                                                            <button class="bracket-nav-btn"
+                                                                    hx-get="/api/events/{{ event_id }}/stages/{{ stage.id }}/bracket-content?view_round={{ stage.view_round - 1 }}"
+                                                                    hx-target="#stage-bracket-inner"
+                                                                    hx-swap="outerHTML transition:true"
+                                                                    _="on click add .animating-bracket to <html/> remove .animating-stage from <html/> add .slide-back to <html/>">&#8592;</button>
+                                                        {% else %}
+                                                            <span class="bracket-nav-btn bracket-nav-disabled"></span>
+                                                        {% endif %}
+                                                        <span class="bracket-nav-label">{{ stage.view_round + 1 }} / {{ stage.total_rounds }}</span>
+                                                        {% if stage.has_next %}
+                                                            <button class="bracket-nav-btn"
+                                                                    hx-get="/api/events/{{ event_id }}/stages/{{ stage.id }}/bracket-content?view_round={{ stage.view_round + 1 }}"
+                                                                    hx-target="#stage-bracket-inner"
+                                                                    hx-swap="outerHTML transition:true"
+                                                                    _="on click add .animating-bracket to <html/> remove .animating-stage from <html/> remove .slide-back from <html/>">&#8594;</button>
+                                                        {% else %}
+                                                            <span class="bracket-nav-btn bracket-nav-disabled"></span>
+                                                        {% endif %}
+                                                    </div>
+                                                    <div class="stage-bracket"
+                                                        style="grid-template-columns: repeat({{ rounds | length }}, 1fr);
+                                                                grid-template-rows: repeat({{ stage.total_rows }}, 1fr)">
+                                                        {% for round in rounds %}
+                                                            {% set col = loop.index %}
+                                                            {% for match in round.matches %}
+                                                                {% set m = loop.index0 %}
+                                                                {# col 1 (parent): cards stacked, each 2 rows. col 2 (child): centred between its two parents. #}
+                                                                {% if col == 1 %}
+                                                                    {% set row_start = m * 2 + 1 %}
+                                                                {% else %}
+                                                                    {% set row_start = m * 4 + 2 %}
+                                                                {% endif %}
+                                                                {# Clickable matches (both players known) open the score modal #}
+                                                                <div class="bracket-match{% if match.clickable %} clickable{% endif %}"
                                                                      style="grid-column: {{ col }};
                                                                             grid-row: {{ row_start }} / span 2"
-                                                                     hx-get="/api/events/{{ event_id }}/matches/{{ match.match_id }}/score/edit?p1_id={{ match.p1_id }}&p2_id={{ match.p2_id }}&view_round={{ stage.view_round }}"
-                                                                     hx-target="#modal-container"
-                                                                     hx-swap="innerHTML">
-                                                            {% else %}
-                                                                <div class="bracket-match"
-                                                                     style="grid-column: {{ col }};
-                                                                            grid-row: {{ row_start }} / span 2">
-                                                            {% endif %} {# match.clickable #}
+                                                                    {% if match.clickable %}
+                                                                    hx-get="/api/events/{{ event_id }}/matches/{{ match.match_id }}/score/edit?p1_id={{ match.p1_id }}&p2_id={{ match.p2_id }}&view_round={{ stage.view_round }}"
+                                                                    hx-target="#modal-container"
+                                                                    hx-swap="innerHTML"
+                                                                    {% endif %}>
+                                                                    <div class="bracket-participant bracket-top{% if match.winner_id and match.winner_id == match.p1_id %} bracket-winner{% endif %}">
+                                                                        {{ match.p1 }}
+                                                                    </div>
+                                                                    <div class="bracket-score">{%- if match.has_score -%}{{ match.score }}{%- elif match.clickable -%}vs{%- endif -%}</div>
+                                                                    <div class="bracket-participant bracket-bottom{% if match.winner_id and match.winner_id == match.p2_id %} bracket-winner{% endif %}">
+                                                                        {{ match.p2 }}
+                                                                    </div>
+                                                                </div>
+                                                            {% endfor %} {# for match #}
+                                                        {% endfor %} {# for round #}
+                                                    </div>
+                                                    {% if stage.third_place_match %}
+                                                        {% set match = stage.third_place_match %}
+                                                        <div class="third-place-section">
+                                                            <div class="third-place-label">Finale 3° Posto</div>
+                                                            <div class="bracket-match third-place-match{% if match.clickable %} clickable{% endif %}"
+                                                                {% if match.clickable %}
+                                                                hx-get="/api/events/{{ event_id }}/matches/{{ match.match_id }}/score/edit?p1_id={{ match.p1_id }}&p2_id={{ match.p2_id }}&view_round={{ stage.view_round }}"
+                                                                hx-target="#modal-container"
+                                                                hx-swap="innerHTML"
+                                                                {% endif %}>
                                                                 <div class="bracket-participant bracket-top{% if match.winner_id and match.winner_id == match.p1_id %} bracket-winner{% endif %}">
                                                                     {{ match.p1 }}
                                                                 </div>
@@ -554,46 +570,20 @@
                                                                     {{ match.p2 }}
                                                                 </div>
                                                             </div>
-                                                        {% endfor %} {# for match #}
-                                                    {% endfor %} {# for round #}
-                                                </div>
-                                                {% if stage.third_place_match %}
-                                                    {% set match = stage.third_place_match %}
-                                                    <div class="third-place-section">
-                                                        <div class="third-place-label">Finale 3° Posto</div>
-                                                        {% if match.clickable %}
-                                                            <div class="bracket-match clickable third-place-match"
-                                                                 hx-get="/api/events/{{ event_id }}/matches/{{ match.match_id }}/score/edit?p1_id={{ match.p1_id }}&p2_id={{ match.p2_id }}&view_round={{ stage.view_round }}"
-                                                                 hx-target="#modal-container"
-                                                                 hx-swap="innerHTML">
-                                                        {% else %}
-                                                            <div class="bracket-match third-place-match">
-                                                        {% endif %}
-                                                            <div class="bracket-participant bracket-top{% if match.winner_id and match.winner_id == match.p1_id %} bracket-winner{% endif %}">
-                                                                {{ match.p1 }}
-                                                            </div>
-                                                            <div class="bracket-score">{%- if match.has_score -%}{{ match.score }}{%- elif match.clickable -%}vs{%- endif -%}</div>
-                                                            <div class="bracket-participant bracket-bottom{% if match.winner_id and match.winner_id == match.p2_id %} bracket-winner{% endif %}">
-                                                                {{ match.p2 }}
-                                                            </div>
                                                         </div>
-                                                    </div>
-                                                {% endif %}
-                                            {% else %}
-                                                <p>Nessun incontro in questa fase.</p>
-                                            {% endif %} {# rounds #}
-                                        </div>
-                                    {% endblock %} {# stage_bracket_inner #}
-                                </div>
-                            {% endblock %} {# stage_bracket_content #}
-
-                        {% endif %} {# stage_kind #}
-                    </div> {# stage-body #}
-                    </div> {# stage-content #}
+                                                    {% endif %}
+                                                {% else %}
+                                                    <p>Nessun incontro in questa fase.</p>
+                                                {% endif %} {# rounds #}
+                                            </div>
+                                        {% endblock %} {# stage_bracket_inner #}
+                                    </div>
+                                {% endblock %} {# stage_bracket_content #}
+                            {% endif %} {# stage_kind #}
+                        </div>
+                    </div>
                 {% endblock %} {# stage_content #}
-
             {% endif %} {# event_status == "registration" #}
-
         </div> {# event-section-content #}
 
         {#
@@ -630,4 +620,4 @@
             {% endif %}
         </div>
     </div>
-{% endblock %} {# event_page #}
+{% endblock %}

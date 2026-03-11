@@ -63,13 +63,14 @@ def _derive_stage_kind(advancement_mechanism, match_size):
         return "single_elimination"
     elif match_size is None:
         return "individual_score"
-    return "groups"
+    else:
+        return "groups"
 
-def _stage_label(advancement_mechanism, match_size):
-    for sk in STAGE_KINDS:
-        if sk["advancement_mechanism"] == advancement_mechanism and sk["match_size"] == match_size:
-            return sk["label"]
-    return "?"
+_STAGE_KIND_LABEL = {
+    "groups":             "Girone",
+    "individual_score":   "Punteggio Individuale",
+    "single_elimination": "Eliminazione Diretta",
+}
 
 entity_list_form_placeholder = {
     "olympiads": "Aggiungi una nuova olimpiade",
@@ -100,6 +101,59 @@ def notify_olympiad_events(conn, olympiad_id: int, event_name: str):
     for row in rows:
         notify_event(row["id"], event_name)
 
+
+############################### Database Queries ################################
+
+def query_get_event_enrolled_participants(conn, event_id: int) -> list[dict]:
+    rows = conn.execute(
+        """
+        SELECT ep.participant_id AS id, COALESCE(pl.name, t.name) AS name
+        FROM event_participants ep
+        JOIN participants p ON p.id = ep.participant_id
+        LEFT JOIN players pl ON pl.id = p.player_id
+        LEFT JOIN teams t ON t.id = p.team_id
+        WHERE ep.event_id = ?
+        """,
+        (event_id,)
+    ).fetchall()
+    event_enrolled_participants = [{"id": row["id"], "name": row["name"]} for row in rows]
+    return event_enrolled_participants
+
+
+def query_get_olympiad_enrolled_participants(conn, olympiad_id: int) -> list[dict]:
+    rows = conn.execute(
+        """
+        SELECT p.id, COALESCE(pl.name, t.name) AS name
+        FROM participants p
+        LEFT JOIN players pl ON pl.id = p.player_id
+        LEFT JOIN teams t ON t.id = p.team_id
+        WHERE COALESCE(pl.olympiad_id, t.olympiad_id) = ?
+        ORDER BY name
+        """,
+        (olympiad_id,)
+    ).fetchall()
+    olympiad_enrolled_participants = [{"id": row["id"], "name": row["name"]} for row in rows]
+    return olympiad_enrolled_participants
+
+def query_get_event_stages_with_num_groups(conn, event_id: int):
+    """
+    Get data from event_stages table for a given event_id and also get
+    for each stage the number of groups in that stage
+    """
+    rows = conn.execute(
+        """
+        SELECT es.id, es.stage_order, es.advancement_mechanism, es.match_size, es.advance_count,
+        (SELECT COUNT(*) FROM groups g WHERE g.event_stage_id = es.id) AS num_groups
+        FROM event_stages es
+        WHERE es.event_id = ?
+        ORDER BY es.stage_order
+        """,
+        (event_id,)
+    ).fetchall()
+    stages = [dict(row) for row in rows]
+    return stages
+
+################################################################################
 
 def derive_event_status(current_stage_order: int, max_stage_order: int):
     """Derive the event's display status from current_stage_order.
@@ -1400,7 +1454,8 @@ def select_event(request: Request, event_id: int, event_name: str = Query(None, 
             event_name=event["name"],
             event_version=event["version"],
             event_status=event_status,
-            olympiad_id=olympiad_id, **extra_ctx
+            olympiad_id=olympiad_id,
+            **extra_ctx
         )
 
     html_content += _oob_badge_html(request, olympiad_id)
@@ -1411,45 +1466,38 @@ def select_event(request: Request, event_id: int, event_name: str = Query(None, 
 
 
 def _get_registration_ctx(conn, event_id: int, olympiad_id: int, score_kind: str = "points") -> dict:
+    # Fetch all stages for a given event. stages_raw is a list of sqlite3.Row objects, e.g.:
+    # [
+    #     {"id": 1, "stage_order": 1, "advancement_mechanism": "pool", "match_size": 2, "advance_count": 2, "num_groups": 3},
+    #     {"id": 2, "stage_order": 2, "advancement_mechanism": "bracket", "match_size": 2, "advance_count": None, "num_groups": 1},
+    # ]
+    # We then convert each Row to a plain dict and add "kind" and "label" keys derived from the mechanism/size.
     stages_raw = conn.execute(
         "SELECT es.id, es.stage_order, es.advancement_mechanism, es.match_size, es.advance_count, "
-        "COALESCE((SELECT COUNT(*) FROM groups g WHERE g.event_stage_id = es.id), 0) AS num_groups "
+        "(SELECT COUNT(*) FROM groups g WHERE g.event_stage_id = es.id) AS num_groups "
         "FROM event_stages es "
         "WHERE es.event_id = ? ORDER BY es.stage_order",
         (event_id,)
     ).fetchall()
-    stages = [dict(s) | {"kind": _derive_stage_kind(s["advancement_mechanism"], s["match_size"]),
-                          "label": _stage_label(s["advancement_mechanism"], s["match_size"])} for s in stages_raw]
-    enrolled_participants = conn.execute(
-        """
-        SELECT ep.participant_id AS id, COALESCE(pl.name, t.name) AS name
-        FROM event_participants ep
-        JOIN participants p ON p.id = ep.participant_id
-        LEFT JOIN players pl ON pl.id = p.player_id
-        LEFT JOIN teams t ON t.id = p.team_id
-        WHERE ep.event_id = ?
-        ORDER BY name
-        """,
-        (event_id,)
-    ).fetchall()
-    enrolled_ids = {p["id"] for p in enrolled_participants}
-    all_participants = conn.execute(
-        """
-        SELECT p.id, COALESCE(pl.name, t.name) AS name
-        FROM participants p
-        LEFT JOIN players pl ON pl.id = p.player_id
-        LEFT JOIN teams t ON t.id = p.team_id
-        WHERE COALESCE(pl.olympiad_id, t.olympiad_id) = ?
-        ORDER BY name
-        """,
-        (olympiad_id,)
-    ).fetchall()
-    available_participants = [p for p in all_participants if p["id"] not in enrolled_ids]
+
+    stages = []
+    for s in stages_raw:
+        stage = dict(s)
+        stage["kind"] = _derive_stage_kind(s["advancement_mechanism"], s["match_size"])
+        stage["label"] = _STAGE_KIND_LABEL[stage["kind"]]
+        stages.append(stage)
+
+    event_enrolled_participants = query_get_event_enrolled_participants(conn, event_id)
+    olympiad_enrolled_participants = query_get_olympiad_enrolled_participants(conn, olympiad_id)
+
+    event_enrolled_ids = { p["id"] for p in event_enrolled_participants }
+    available_participants = [p for p in olympiad_enrolled_participants if p["id"] not in event_enrolled_ids]
+
     return dict(
         score_kinds=SCORE_KINDS,
         current_score_kind=score_kind,
         stages=stages,
-        enrolled_participants=enrolled_participants,
+        enrolled_participants=event_enrolled_participants,
         available_participants=available_participants,
     )
 
@@ -1467,7 +1515,7 @@ def _get_stage_ctx(conn, event_id: int, stage_order: int) -> dict:
 
     stage_id   = row["id"]
     stage_kind = _derive_stage_kind(row["advancement_mechanism"], row["match_size"])
-    stage_label = _stage_label(row["advancement_mechanism"], row["match_size"])
+    stage_label = _STAGE_KIND_LABEL[stage_kind]
 
     total_stages = conn.execute(
         "SELECT COUNT(*) AS count FROM event_stages WHERE event_id = ?",
@@ -1517,7 +1565,9 @@ def _set_event_stage_order(request: Request, event_id: int, new_stage_order: int
             "SELECT id, name, version, score_kind FROM events WHERE id = ?",
             (event_id,)
         ).fetchone()
+
         event_status = derive_event_status(new_stage_order, max_stage_order)
+
         extra_ctx = {}
         if event_status == "registration":
             extra_ctx = _get_registration_ctx(conn, event_id, olympiad_id, event["score_kind"])
@@ -1550,12 +1600,12 @@ def _set_event_stage_order(request: Request, event_id: int, new_stage_order: int
 
 @app.post("/api/events/{event_id}/start")
 def start_event(request: Request, event_id: int):
-    return _set_event_stage_order(request, event_id, 1)
+    return _set_event_stage_order(request, event_id, new_stage_order=1)
 
 
 @app.post("/api/events/{event_id}/back-to-registration")
 def back_to_registration(request: Request, event_id: int):
-    return _set_event_stage_order(request, event_id, 0)
+    return _set_event_stage_order(request, event_id, new_stage_order=0)
 
 
 @app.post("/api/events/{event_id}/finish")
@@ -1566,7 +1616,7 @@ def finish_event(request: Request, event_id: int):
         (event_id,)
     ).fetchone()
     max_stage_order = max_stage["max_order"] if max_stage and max_stage["max_order"] else 1
-    return _set_event_stage_order(request, event_id, max_stage_order + 1)
+    return _set_event_stage_order(request, event_id, new_stage_order=max_stage_order+1)
 
 
 @app.post("/api/events/{event_id}/back-to-running")
@@ -1587,37 +1637,17 @@ def get_event_players(request: Request, event_id: int):
     olympiad_badge_ctx = get_olympiad_from_request(request)
     olympiad_id = olympiad_badge_ctx["id"]
 
-    enrolled_participants = conn.execute(
-        """
-        SELECT ep.participant_id AS id, COALESCE(pl.name, t.name) AS name
-        FROM event_participants ep
-        JOIN participants p ON p.id = ep.participant_id
-        LEFT JOIN players pl ON pl.id = p.player_id
-        LEFT JOIN teams t ON t.id = p.team_id
-        WHERE ep.event_id = ?
-        ORDER BY name
-        """,
-        (event_id,)
-    ).fetchall()
-    enrolled_ids = { p["id"] for p in enrolled_participants }
+    event_enrolled_participants = query_get_event_enrolled_participants(conn, event_id)
+    olympiad_enrolled_participants = query_get_olympiad_enrolled_participants(conn, olympiad_id)
 
-    all_participants = conn.execute(
-        """
-        SELECT p.id, COALESCE(pl.name, t.name) AS name
-        FROM participants p
-        LEFT JOIN players pl ON pl.id = p.player_id
-        LEFT JOIN teams t ON t.id = p.team_id
-        WHERE COALESCE(pl.olympiad_id, t.olympiad_id) = ?
-        ORDER BY name
-        """,
-        (olympiad_id,)
-    ).fetchall()
-    available_participants = [ p for p in all_participants if p["id"] not in enrolled_ids ]
+    enrolled_ids = { p["id"] for p in event_enrolled_participants }
+    event_available_participants = [ p for p in olympiad_enrolled_participants if p["id"] not in enrolled_ids ]
+
     html_content = render_event_fragment(
         "event_player_container",
         event_id=event_id,
-        enrolled_participants=enrolled_participants,
-        available_participants=available_participants
+        enrolled_participants=event_enrolled_participants,
+        available_participants=event_available_participants
     )
 
     response = HTMLResponse(html_content)
@@ -1645,7 +1675,7 @@ def get_event_stage(request: Request, event_id: int, stage_order: int):
     else:
         stage_id    = row["id"]
         stage_kind  = _derive_stage_kind(row["advancement_mechanism"], row["match_size"])
-        stage_label = _stage_label(row["advancement_mechanism"], row["match_size"])
+        stage_label = _STAGE_KIND_LABEL[stage_kind]
 
         total_stages = conn.execute(
             "SELECT COUNT(*) AS count FROM event_stages WHERE event_id = ?",
@@ -1711,7 +1741,7 @@ def go_to_next_stage(request: Request, event_id: int, stage_order: int):
 
     next_stage_id    = next_row["id"]
     next_stage_kind  = _derive_stage_kind(next_row["advancement_mechanism"], next_row["match_size"])
-    next_stage_label = _stage_label(next_row["advancement_mechanism"], next_row["match_size"])
+    next_stage_label = _STAGE_KIND_LABEL[next_stage_kind]
 
     if next_stage_kind == "groups":
         stage = events.present_groups_stage(conn, next_stage_id)
@@ -1824,7 +1854,7 @@ def cancel_edit_stage_kind(request: Request, event_id: int, stage_id: int):
         {
             "stage_id": stage_id,
             "event_id": event_id,
-            "current_label": _stage_label(row["advancement_mechanism"], row["match_size"]),
+            "current_label": _STAGE_KIND_LABEL[_derive_stage_kind(row["advancement_mechanism"], row["match_size"])],
         }
     )
 
@@ -2130,7 +2160,7 @@ def get_event_setup(request: Request, event_id: int, version: int = Query(...)):
             (event_id,)
         ).fetchall()
         stages = [dict(s) | {"kind": _derive_stage_kind(s["advancement_mechanism"], s["match_size"]),
-                              "label": _stage_label(s["advancement_mechanism"], s["match_size"])} for s in stages_raw]
+                              "label": _STAGE_KIND_LABEL[_derive_stage_kind(s["advancement_mechanism"], s["match_size"])]} for s in stages_raw]
 
         html_content = render_event_fragment(
             "event_setup",
@@ -2255,51 +2285,27 @@ def remove_event_stage(request: Request, event_id: int, stage_id: int):
 def _render_stages_section_html(conn, event_id: int):
     """Re-render the stages setup section for the event page."""
 
-    stages_raw = conn.execute(
-        "SELECT es.id, es.stage_order, es.advancement_mechanism, es.match_size, es.advance_count, "
-        "COALESCE((SELECT COUNT(*) FROM groups g WHERE g.event_stage_id = es.id), 0) AS num_groups "
-        "FROM event_stages es WHERE es.event_id = ? ORDER BY es.stage_order",
-        (event_id,)
-    ).fetchall()
-    stages = [dict(s) | {"kind": _derive_stage_kind(s["advancement_mechanism"], s["match_size"]),
-                          "label": _stage_label(s["advancement_mechanism"], s["match_size"])} for s in stages_raw]
+    stages = query_get_event_stages_with_num_groups(conn, event_id)
+    for stage in stages:
+        stage["kind"] = _derive_stage_kind(stage["advancement_mechanism"], stage["match_size"])
+        stage["label"] = _STAGE_KIND_LABEL[stage["kind"]]
 
     return render_event_fragment("stages_setup_section", event_id=event_id, stages=stages)
 
 
 def _render_event_players_section_html(conn, event_id, olympiad_id):
-    enrolled_participants = conn.execute(
-        """
-        SELECT ep.participant_id AS id, COALESCE(pl.name, t.name) AS name
-        FROM event_participants ep
-        JOIN participants p ON p.id = ep.participant_id
-        LEFT JOIN players pl ON pl.id = p.player_id
-        LEFT JOIN teams t ON t.id = p.team_id
-        WHERE ep.event_id = ?
-        ORDER BY name
-        """,
-        (event_id,)
-    ).fetchall()
-    enrolled_ids = {p["id"] for p in enrolled_participants}
+    event_enrolled_participants = query_get_event_enrolled_participants(conn, event_id)
+    olympiad_enrolled_participants = query_get_olympiad_enrolled_participants(conn, olympiad_id)
 
-    all_participants = conn.execute(
-        """
-        SELECT p.id, COALESCE(pl.name, t.name) AS name
-        FROM participants p
-        LEFT JOIN players pl ON pl.id = p.player_id
-        LEFT JOIN teams t ON t.id = p.team_id
-        WHERE COALESCE(pl.olympiad_id, t.olympiad_id) = ?
-        ORDER BY name
-        """,
-        (olympiad_id,)
-    ).fetchall()
-    available_participants = [p for p in all_participants if p["id"] not in enrolled_ids]
+    enrolled_ids = {p["id"] for p in event_enrolled_participants}
+
+    event_available_participants = [p for p in olympiad_enrolled_participants if p["id"] not in enrolled_ids]
 
     return render_event_fragment(
         "event_player_container",
         event_id=event_id,
-        enrolled_participants=enrolled_participants,
-        available_participants=available_participants,
+        enrolled_participants=event_enrolled_participants,
+        available_participants=event_available_participants,
     )
 
 
@@ -2309,19 +2315,10 @@ def enroll_participant(request: Request, event_id: int, participant_id: int):
 
     olympiad_badge_ctx = get_olympiad_from_request(request)
     olympiad_id = olympiad_badge_ctx["id"]
-    # olympiad_name = olympiad_badge_ctx["name"]
 
     conn.execute("BEGIN IMMEDIATE")
 
     result = Status.SUCCESS
-    # if not check_olympiad_exist(request, olympiad_id):
-    #     result = Status.OLYMPIAD_NOT_FOUND
-    # if result == Status.SUCCESS and not check_olympiad_name(request, olympiad_id, olympiad_name):
-    #     result = Status.OLYMPIAD_RENAMED
-    # if result == Status.SUCCESS and not check_entity_exist(request, "events", event_id):
-    #     result = Status.ENTITY_NOT_FOUND
-    # if result == Status.SUCCESS and not check_user_authorized(request, olympiad_id):
-    #     result = Status.NOT_AUTHORIZED
     if not check_user_authorized(request, olympiad_id):
         result = Status.NOT_AUTHORIZED
 
@@ -2360,7 +2357,6 @@ def enroll_participant(request: Request, event_id: int, participant_id: int):
 
         html_content = _render_event_players_section_html(conn, event_id, olympiad_id)
 
-    # html_content += _oob_badge_html(request, olympiad_id)
     response = HTMLResponse(html_content)
     response.headers.update(extra_headers)
 
