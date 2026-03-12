@@ -307,12 +307,14 @@ def present_individual_score_stage(conn, stage_id: int):
     ).fetchone()
     advance_count = advance_row["advance_count"] if advance_row else None
 
-    return {
+    stage = {
         "groups": groups,
         "id": stage_id,
         "total_participants": total_participants,
         "advance_count": advance_count,
     }
+
+    return stage
 
 
 def present_groups_stage(conn, stage_id: int):
@@ -490,7 +492,7 @@ def advance_bracket_loser(conn, match_id, winner_id):
             )
 
 
-def present_single_elimination_stage(conn, stage_id, view_round=0):
+def present_single_elimination_stage(conn, stage_id, view_round):
     """Build a single-elimination stage dict from DB data.
 
     Returns two consecutive rounds (a parent and its child) for the given
@@ -507,9 +509,16 @@ def present_single_elimination_stage(conn, stage_id, view_round=0):
     ).fetchall()
 
     if not rows:
-        return {"rounds": [], "id": stage_id,
-                "view_round": 0, "total_rounds": 0, "has_prev": False, "has_next": False,
-                "total_rows": 0, "third_place_match": None}
+        return {
+            "rounds": [],
+            "id": stage_id,
+            "view_round": 0,
+            "total_rounds": 0,
+            "has_prev": False,
+            "has_next": False,
+            "total_rows": 0,
+            "third_place_match": None
+        }
 
     match_ids = [r["match_id"] for r in rows]
     placeholders = ",".join("?" * len(match_ids))
@@ -542,6 +551,7 @@ def present_single_elimination_stage(conn, stage_id, view_round=0):
 
     feeders = defaultdict(list)
     matches_by_id = {}
+
     # Identify the third-place match: it's the loser_next_match_id target of semifinals.
     third_place_id = None
     for r in rows:
@@ -758,7 +768,7 @@ def compute_group_standings(conn, stage_id: int):
     return result
 
 
-def cascade_rebuild_subsequent_stages(conn, from_stage_id: int):
+def rebuild_subsequent_stages(conn, from_stage_id: int):
     """Tear down and rebuild every stage that follows from_stage_id.
 
     Called after any score update so that subsequent stages always reflect

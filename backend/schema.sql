@@ -72,7 +72,7 @@ CREATE TABLE event_stages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
     advancement_mechanism TEXT NOT NULL DEFAULT 'pool' CHECK(advancement_mechanism IN ('pool', 'bracket')),
-    match_size INTEGER, -- NULL means all participants in one match; 2 means head-to-head
+    match_size INTEGER NOT NULL DEFAULT 2 CHECK(match_size >= 0), -- 0 means all participants in one match; 2 means head-to-head
     stage_order INTEGER NOT NULL,
     advance_count INTEGER NOT NULL DEFAULT 1 CHECK(advance_count >= 0), -- 0 for final stage, >= 1 for non-final
     version INTEGER NOT NULL DEFAULT 1,

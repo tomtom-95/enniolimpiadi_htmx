@@ -362,10 +362,10 @@
                                         {% endif %}
                                         {% block stage_groups_inner %}
                                             <div id="stage-groups-inner"
-                                                hx-trigger="sse:score-update"
-                                                hx-get="/api/events/{{ event_id }}/stages/{{ stage.id }}/groups-content"
-                                                hx-swap="outerHTML"
-                                                hx-target="this">
+                                                 hx-trigger="sse:score-update"
+                                                 hx-get="/api/events/{{ event_id }}/stages/{{ stage.id }}/groups-content"
+                                                 hx-swap="outerHTML"
+                                                 hx-target="this">
                                                 <div class="stage-groups">
                                                     {% for group in stage.groups %}
                                                         <div class="group-card">
@@ -437,10 +437,10 @@
                                         {% endif %}
                                         {% block stage_individual_score_inner %}
                                             <div id="stage-individual-score-inner"
-                                                hx-trigger="sse:score-update"
-                                                hx-get="/api/events/{{ event_id }}/stages/{{ stage.id }}/individual-score-content"
-                                                hx-swap="outerHTML"
-                                                hx-target="this">
+                                                 hx-trigger="sse:score-update"
+                                                 hx-get="/api/events/{{ event_id }}/stages/{{ stage.id }}/individual-score-content"
+                                                 hx-swap="outerHTML"
+                                                 hx-target="this">
                                                 <div class="stage-groups">
                                                     {% for group in stage.groups %}
                                                         <div class="group-card">
@@ -452,9 +452,9 @@
                                                             <div class="individual-score-list">
                                                                 {% for participant in group.participants %}
                                                                     <div class="individual-score-row"
-                                                                        hx-get="/api/events/{{ event_id }}/matches/{{ group.match_id }}/individual-score/edit?participant_id={{ participant.id }}"
-                                                                        hx-target="#modal-container"
-                                                                        hx-swap="innerHTML">
+                                                                         hx-get="/api/events/{{ event_id }}/matches/{{ group.match_id }}/individual-score/edit?participant_id={{ participant.id }}"
+                                                                         hx-target="#modal-container"
+                                                                         hx-swap="innerHTML">
                                                                         <span class="individual-score-rank">{{ loop.index }}</span>
                                                                         <span class="individual-score-name">{{ participant.name }}</span>
                                                                         <span class="individual-score-value{% if participant.score is none %} no-score{% endif %}">

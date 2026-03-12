@@ -112,7 +112,7 @@ def seed_dummy_data(db_path: Path):
         # Create event stage for Event2 (individual_score)
         conn.execute(
             "INSERT INTO event_stages (event_id, advancement_mechanism, match_size, stage_order) VALUES (?, ?, ?, ?)",
-            (2, "pool", None, 1)
+            (2, "pool", 0, 1)
         )
 
         # Now I must create participants with team_id = NULL (they are just player)

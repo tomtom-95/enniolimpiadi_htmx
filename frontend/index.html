@@ -40,37 +40,37 @@
         </div>
         <div id="modal-container"></div>
     </body>
-<script>
-    document.body.addEventListener('htmx:configRequest', function(evt) {
-        const badge = document.getElementById('olympiad-badge');
-        evt.detail.headers['X-Olympiad-Id'] = badge.dataset.id;
-        evt.detail.headers['X-Olympiad-Version'] = badge.dataset.version;
-        evt.detail.headers['X-Olympiad-Name'] = badge.dataset.name;
-    });
+    <script>
+        document.body.addEventListener('htmx:configRequest', function(evt) {
+            const badge = document.getElementById('olympiad-badge');
+            evt.detail.headers['X-Olympiad-Id'] = badge.dataset.id;
+            evt.detail.headers['X-Olympiad-Version'] = badge.dataset.version;
+            evt.detail.headers['X-Olympiad-Name'] = badge.dataset.name;
+        });
 
-    // --- PIN auth: intercept and re-trigger after validation ---
-    var _pendingAuthElement = null;
+        // --- PIN auth: intercept and re-trigger after validation ---
+        var _pendingAuthElement = null;
 
-    // When a response signals PIN is required, store the element that made the
-    // request so we can re-trigger it after successful PIN validation.
-    document.body.addEventListener('htmx:afterRequest', function(evt) {
-        if (evt.detail.xhr.getResponseHeader('HX-Pin-Required')) {
-            _pendingAuthElement = evt.detail.elt;
-        }
-    });
+        // When a response signals PIN is required, store the element that made the
+        // request so we can re-trigger it after successful PIN validation.
+        document.body.addEventListener('htmx:afterRequest', function(evt) {
+            if (evt.detail.xhr.getResponseHeader('HX-Pin-Required')) {
+                _pendingAuthElement = evt.detail.elt;
+            }
+        });
 
-    // After successful PIN validation, re-trigger the original element
-    document.body.addEventListener('pinValidated', function() {
-        if (!_pendingAuthElement) return;
-        var elt = _pendingAuthElement;
-        _pendingAuthElement = null;
+        // After successful PIN validation, re-trigger the original element
+        document.body.addEventListener('pinValidated', function() {
+            if (!_pendingAuthElement) return;
+            var elt = _pendingAuthElement;
+            _pendingAuthElement = null;
 
-        // TODO: would be cool to remove this if
-        if (elt.tagName === 'FORM') {
-            htmx.trigger(elt, 'submit');
-        } else {
-            htmx.trigger(elt, 'click');
-        }
-    });
-</script>
+            // TODO: would be cool to remove this if
+            if (elt.tagName === 'FORM') {
+                htmx.trigger(elt, 'submit');
+            } else {
+                htmx.trigger(elt, 'click');
+            }
+        });
+    </script>
 </html>
