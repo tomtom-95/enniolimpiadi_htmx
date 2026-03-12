@@ -74,7 +74,7 @@ CREATE TABLE event_stages (
     advancement_mechanism TEXT NOT NULL DEFAULT 'pool' CHECK(advancement_mechanism IN ('pool', 'bracket')),
     match_size INTEGER, -- NULL means all participants in one match; 2 means head-to-head
     stage_order INTEGER NOT NULL,
-    advance_count INTEGER, -- null for final stage
+    advance_count INTEGER NOT NULL DEFAULT 1 CHECK(advance_count >= 0), -- 0 for final stage, >= 1 for non-final
     version INTEGER NOT NULL DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,

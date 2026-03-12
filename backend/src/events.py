@@ -758,6 +758,33 @@ def compute_group_standings(conn, stage_id: int):
     return result
 
 
+def cascade_rebuild_subsequent_stages(conn, from_stage_id: int):
+    """Tear down and rebuild every stage that follows from_stage_id.
+
+    Called after any score update so that subsequent stages always reflect
+    the latest standings. Each stage is rebuilt using populate_next_stage_from_groups,
+    which resolves current group standings and regenerates the next stage.
+    The cascade stops when there is no further stage or advance_count is 0
+    (i.e., the current stage is the final one).
+    """
+    current_id = from_stage_id
+    while True:
+        populated = populate_next_stage_from_groups(conn, current_id)
+        if not populated:
+            break
+        row = conn.execute(
+            "SELECT event_id, stage_order FROM event_stages WHERE id = ?",
+            (current_id,)
+        ).fetchone()
+        next_row = conn.execute(
+            "SELECT id FROM event_stages WHERE event_id = ? AND stage_order = ?",
+            (row["event_id"], row["stage_order"] + 1)
+        ).fetchone()
+        if not next_row:
+            break
+        current_id = next_row["id"]
+
+
 def populate_next_stage_from_groups(conn, stage_id: int) -> bool:
     """Populate the stage after stage_id using top advance_count participants from each group.
 

@@ -34,6 +34,7 @@ class Status(Enum):
     STAGE_INVALID              = "stage_invalid"
     NOT_ENOUGH_PARTICIPANTS    = "not_enough_participants"
     PLAYER_IN_RUNNING_EVENT    = "player_in_running_event"
+    PREVIOUS_STAGE_INCOMPLETE  = "previous_stage_incomplete"
 
 db_path = Path(os.environ["DATABASE_PATH"])
 schema_path = Path(os.environ["SCHEMA_PATH"])
@@ -58,6 +59,12 @@ STAGE_KINDS = [
     {"advancement_mechanism": "bracket", "match_size": 2, "label": "Eliminazione Diretta"},
 ]
 
+_STAGE_KIND_LABEL = {
+    "groups":             "Girone",
+    "individual_score":   "Punteggio Individuale",
+    "single_elimination": "Eliminazione Diretta",
+}
+
 def _derive_stage_kind(advancement_mechanism, match_size):
     if advancement_mechanism == "bracket":
         return "single_elimination"
@@ -65,12 +72,6 @@ def _derive_stage_kind(advancement_mechanism, match_size):
         return "individual_score"
     else:
         return "groups"
-
-_STAGE_KIND_LABEL = {
-    "groups":             "Girone",
-    "individual_score":   "Punteggio Individuale",
-    "single_elimination": "Eliminazione Diretta",
-}
 
 entity_list_form_placeholder = {
     "olympiads": "Aggiungi una nuova olimpiade",
@@ -153,20 +154,37 @@ def query_get_event_stages_with_num_groups(conn, event_id: int):
     stages = [dict(row) for row in rows]
     return stages
 
+def query_get_event_max_stage_order(conn, event_id: int):
+    """
+    Get the max stage_order for event stages of event_id.
+    Return 0 if there are no event_stages for this event_id
+    """
+    row = conn.execute(
+        "SELECT MAX(stage_order) AS max_order FROM event_stages WHERE event_id = ?",
+        (event_id,)
+    ).fetchone()
+    return row["max_order"] or 0
+
+
 ################################################################################
 
 def derive_event_status(current_stage_order: int, max_stage_order: int):
     """Derive the event's display status from current_stage_order.
 
-    - NULL or 0 -> 'registration'
+    - 0 -> 'registration'
     - 1..max_stage_order -> 'started'
     - > max_stage_order -> 'finished'
     """
-    if current_stage_order is None or current_stage_order == 0:
-        return "registration"
-    if max_stage_order is not None and current_stage_order > max_stage_order:
-        return "finished"
-    return "started"
+    event_status = ""
+
+    if current_stage_order == 0:
+        event_status = "registration"
+    elif current_stage_order <= max_stage_order:
+        event_status = "started"
+    else:
+        event_status = "finished"
+    
+    return event_status
 
 
 def get_olympiad_from_request(request: Request) -> dict:
@@ -210,7 +228,8 @@ def _render_operation_denied(result, olympiad_id, entities):
         result == Status.EVENT_VERSION_OUTDATED      or
         result == Status.STAGE_INVALID               or
         result == Status.NOT_ENOUGH_PARTICIPANTS     or
-        result == Status.PLAYER_IN_RUNNING_EVENT
+        result == Status.PLAYER_IN_RUNNING_EVENT     or
+        result == Status.PREVIOUS_STAGE_INCOMPLETE
     )
 
     if needs_modal:
@@ -228,6 +247,8 @@ def _render_operation_denied(result, olympiad_id, entities):
     elif result == Status.NOT_AUTHORIZED:
         extra_headers["HX-Pin-Required"] = "true"
         html_content = templates.get_template("pin_modal.html").render(olympiad_id=olympiad_id)
+    elif result == Status.PREVIOUS_STAGE_INCOMPLETE:
+        html_content = templates.get_template("previous_stage_incomplete.html").render()
     elif result in (
         Status.EVENT_NOT_IN_REGISTRATION,
         Status.EVENT_VERSION_OUTDATED,
@@ -282,6 +303,40 @@ def check_user_authorized(request: Request, olympiad_id: int):
         (session_id, olympiad_id)
     ).fetchone()
     return result
+
+def check_previous_stage_complete(request: Request, match_id: int):
+    conn = request.state.conn
+
+    stage_row = conn.execute(
+        "SELECT es.stage_order, es.event_id "
+        "FROM matches m "
+        "JOIN groups g ON g.id = m.group_id "
+        "JOIN event_stages es ON es.id = g.event_stage_id "
+        "WHERE m.id = ?",
+        (match_id,)
+    ).fetchone()
+
+    if stage_row["stage_order"] <= 1:
+        return True
+
+    incomplete_count = conn.execute(
+        """
+        SELECT COUNT(*) AS cnt
+        FROM matches m
+        JOIN groups g ON g.id = m.group_id
+        JOIN event_stages es ON es.id = g.event_stage_id
+        WHERE es.event_id = ? AND es.stage_order = ?
+            AND (SELECT COUNT(*) FROM match_participants mp WHERE mp.match_id = m.id) >= 2
+            AND (
+                SELECT COUNT(*) FROM match_participants mp
+                LEFT JOIN match_participant_scores mps
+                ON mps.match_id = mp.match_id AND mps.participant_id = mp.participant_id
+                WHERE mp.match_id = m.id AND mps.match_id IS NULL
+            ) > 0
+        """,
+        (stage_row["event_id"], stage_row["stage_order"] - 1)
+    ).fetchone()["cnt"]
+    return incomplete_count == 0
 
 
 def check_olympiad_name_duplication(request: Request, olympiad_id: int, name: str):
@@ -599,6 +654,8 @@ def get_edit_score(
     result = Status.SUCCESS
     if not check_user_authorized(request, olympiad_id):
         result = Status.NOT_AUTHORIZED
+    if result == Status.SUCCESS and not check_previous_stage_complete(request, match_id):
+        result = Status.PREVIOUS_STAGE_INCOMPLETE
 
     html_content, extra_headers = _render_operation_denied(result, olympiad_id, "events")
 
@@ -735,6 +792,8 @@ async def update_match_score(
             events.advance_bracket_winner(conn, match_id, winner_id)
             events.advance_bracket_loser(conn, match_id, winner_id)
 
+        events.cascade_rebuild_subsequent_stages(conn, stage_id)
+
         new_event_version = conn.execute(
             "UPDATE events SET version = version + 1 WHERE id = ? RETURNING version",
             (event_id,)
@@ -855,6 +914,8 @@ async def update_individual_score(
             (match_id,)
         ).fetchone()
         stage_id = stage_row["event_stage_id"]
+
+        events.cascade_rebuild_subsequent_stages(conn, stage_id)
 
         new_event_version = conn.execute(
             "UPDATE events SET version = version + 1 WHERE id = ? RETURNING version",
@@ -1223,16 +1284,21 @@ def create_event(request: Request, name: str = Form(...)):
 
     if result == Status.SUCCESS:
         event = conn.execute(
-            "INSERT INTO events (name, olympiad_id) VALUES (?, ?) RETURNING id, name, version",
+            """
+            INSERT INTO events (name, olympiad_id)
+            VALUES (?, ?)
+            RETURNING id, name, version, current_stage_order, score_kind
+            """,
             (name, olympiad_id)
         ).fetchone()
+        event_ctx = _get_event_ctx(conn, event["id"], olympiad_id, event["score_kind"], event["current_stage_order"])
         html_content = render_event_fragment(
             "event_page",
             event_id=event["id"],
             event_name=event["name"],
             event_version=event["version"],
-            event_status="registration",
             olympiad_id=olympiad_id,
+            **event_ctx,
         )
 
     html_content += _oob_badge_html(request, olympiad_id)
@@ -1429,33 +1495,21 @@ def select_event(request: Request, event_id: int, event_name: str = Query(None, 
         extra_headers["HX-Retarget"] = f"#events-{event_id}"
         extra_headers["HX-Reswap"] = "outerHTML"
     elif result == Status.SUCCESS:
-        max_stage = conn.execute(
-            "SELECT MAX(stage_order) AS max_order FROM event_stages WHERE event_id = ?",
-            (event_id,)
-        ).fetchone()
-        max_stage_order = max_stage["max_order"] if max_stage else None
-
         event = conn.execute(
             "SELECT id, name, version, current_stage_order, score_kind FROM events WHERE id = ?",
             (event_id,)
         ).fetchone()
-        event_status = derive_event_status(event["current_stage_order"], max_stage_order)
-        extra_ctx = {}
-        if event_status == "registration":
-            extra_ctx = _get_registration_ctx(conn, event_id, olympiad_id, event["score_kind"])
-        elif event_status == "finished":
-            extra_ctx = _get_stage_ctx(conn, event_id, max_stage_order)
-        else:
-            extra_ctx = _get_stage_ctx(conn, event_id, event["current_stage_order"])
+
+        event_ctx = _get_event_ctx(conn, event_id, olympiad_id, event["score_kind"], event["current_stage_order"])
 
         html_content = render_event_fragment(
             "event_page",
             event_id=event["id"],
             event_name=event["name"],
             event_version=event["version"],
-            event_status=event_status,
             olympiad_id=olympiad_id,
-            **extra_ctx
+            is_admin=check_user_authorized(request, olympiad_id),
+            **event_ctx
         )
 
     html_content += _oob_badge_html(request, olympiad_id)
@@ -1465,13 +1519,13 @@ def select_event(request: Request, event_id: int, event_name: str = Query(None, 
     return response
 
 
-def _get_registration_ctx(conn, event_id: int, olympiad_id: int, score_kind: str = "points") -> dict:
-    # Fetch all stages for a given event. stages_raw is a list of sqlite3.Row objects, e.g.:
-    # [
-    #     {"id": 1, "stage_order": 1, "advancement_mechanism": "pool", "match_size": 2, "advance_count": 2, "num_groups": 3},
-    #     {"id": 2, "stage_order": 2, "advancement_mechanism": "bracket", "match_size": 2, "advance_count": None, "num_groups": 1},
-    # ]
-    # We then convert each Row to a plain dict and add "kind" and "label" keys derived from the mechanism/size.
+def _get_event_ctx(conn, event_id: int, olympiad_id: int, score_kind: str, current_stage_order: int) -> dict:
+    ctx = {}
+
+    max_stage_order = query_get_event_max_stage_order(conn, event_id)
+    ctx["event_status"] = derive_event_status(current_stage_order, max_stage_order)
+
+    # Registration context
     stages_raw = conn.execute(
         "SELECT es.id, es.stage_order, es.advancement_mechanism, es.match_size, es.advance_count, "
         "(SELECT COUNT(*) FROM groups g WHERE g.event_stage_id = es.id) AS num_groups "
@@ -1489,11 +1543,10 @@ def _get_registration_ctx(conn, event_id: int, olympiad_id: int, score_kind: str
 
     event_enrolled_participants = query_get_event_enrolled_participants(conn, event_id)
     olympiad_enrolled_participants = query_get_olympiad_enrolled_participants(conn, olympiad_id)
-
-    event_enrolled_ids = { p["id"] for p in event_enrolled_participants }
+    event_enrolled_ids = {p["id"] for p in event_enrolled_participants}
     available_participants = [p for p in olympiad_enrolled_participants if p["id"] not in event_enrolled_ids]
 
-    return dict(
+    ctx.update(
         score_kinds=SCORE_KINDS,
         current_score_kind=score_kind,
         stages=stages,
@@ -1501,8 +1554,8 @@ def _get_registration_ctx(conn, event_id: int, olympiad_id: int, score_kind: str
         available_participants=available_participants,
     )
 
-
-def _get_stage_ctx(conn, event_id: int, stage_order: int) -> dict:
+    # Stage context
+    stage_order = min(current_stage_order, max_stage_order)
     row = conn.execute(
         "SELECT es.id, es.stage_order, es.advancement_mechanism, es.match_size "
         "FROM event_stages es "
@@ -1510,29 +1563,29 @@ def _get_stage_ctx(conn, event_id: int, stage_order: int) -> dict:
         (event_id, stage_order)
     ).fetchone()
 
-    if not row:
-        return {}
+    if row:
+        stage_id = row["id"]
+        stage_kind = _derive_stage_kind(row["advancement_mechanism"], row["match_size"])
+        stage_label = _STAGE_KIND_LABEL[stage_kind]
+        total_stages = conn.execute(
+            "SELECT COUNT(*) AS count FROM event_stages WHERE event_id = ?",
+            (event_id,)
+        ).fetchone()["count"]
 
-    stage_id   = row["id"]
-    stage_kind = _derive_stage_kind(row["advancement_mechanism"], row["match_size"])
-    stage_label = _STAGE_KIND_LABEL[stage_kind]
+        if stage_kind == "groups":
+            stage = events.present_groups_stage(conn, stage_id)
+        elif stage_kind == "individual_score":
+            stage = events.present_individual_score_stage(conn, stage_id)
+        elif stage_kind == "single_elimination":
+            stage = events.present_single_elimination_stage(conn, stage_id)
+        else:
+            stage = None
 
-    total_stages = conn.execute(
-        "SELECT COUNT(*) AS count FROM event_stages WHERE event_id = ?",
-        (event_id,)
-    ).fetchone()["count"]
+        if stage is not None:
+            stage["name"] = stage_label
+            ctx.update(stage=stage, stage_kind=stage_kind, stage_order=stage_order, total_stages=total_stages)
 
-    if stage_kind == "groups":
-        stage = events.present_groups_stage(conn, stage_id)
-    elif stage_kind == "individual_score":
-        stage = events.present_individual_score_stage(conn, stage_id)
-    elif stage_kind == "single_elimination":
-        stage = events.present_single_elimination_stage(conn, stage_id)
-    else:
-        return {}
-
-    stage["name"] = stage_label
-    return dict(stage=stage, stage_kind=stage_kind, stage_order=stage_order, total_stages=total_stages)
+    return ctx
 
 
 def _set_event_stage_order(request: Request, event_id: int, new_stage_order: int):
@@ -1540,8 +1593,6 @@ def _set_event_stage_order(request: Request, event_id: int, new_stage_order: int
 
     olympiad_badge_ctx = get_olympiad_from_request(request)
     olympiad_id = olympiad_badge_ctx["id"]
-
-    conn.execute("BEGIN IMMEDIATE")
 
     result = Status.SUCCESS
     if not check_user_authorized(request, olympiad_id):
@@ -1555,79 +1606,114 @@ def _set_event_stage_order(request: Request, event_id: int, new_stage_order: int
             (new_stage_order, event_id)
         )
 
-        max_stage = conn.execute(
-            "SELECT MAX(stage_order) AS max_order FROM event_stages WHERE event_id = ?",
-            (event_id,)
-        ).fetchone()
-        max_stage_order = max_stage["max_order"] if max_stage else None
-
         event = conn.execute(
             "SELECT id, name, version, score_kind FROM events WHERE id = ?",
             (event_id,)
         ).fetchone()
 
-        event_status = derive_event_status(new_stage_order, max_stage_order)
-
-        extra_ctx = {}
-        if event_status == "registration":
-            extra_ctx = _get_registration_ctx(conn, event_id, olympiad_id, event["score_kind"])
-        elif event_status == "finished":
-            extra_ctx = _get_stage_ctx(conn, event_id, max_stage_order)
-        else:
-            extra_ctx = _get_stage_ctx(conn, event_id, new_stage_order)
+        event_ctx = _get_event_ctx(conn, event_id, olympiad_id, event["score_kind"], new_stage_order)
 
         html_content = render_event_fragment(
             "event_page",
             event_id=event["id"],
             event_name=event["name"],
             event_version=event["version"],
-            event_status=event_status,
             olympiad_id=olympiad_id,
-            **extra_ctx
+            is_admin=check_user_authorized(request, olympiad_id),
+            **event_ctx
         )
 
     response = HTMLResponse(html_content)
     response.headers.update(extra_headers)
+
+    return result, response
+
+
+@app.post("/api/events/{event_id}/start")
+def start_event(request: Request, event_id: int):
+    conn = request.state.conn
+
+    conn.execute("BEGIN IMMEDIATE")
+
+    result, response = _set_event_stage_order(request, event_id, new_stage_order=1)
+    if result == Status.SUCCESS:
+        first_stage = conn.execute(
+            "SELECT id, advancement_mechanism, match_size FROM event_stages WHERE event_id = ? AND stage_order = 1",
+            (event_id,)
+        ).fetchone()
+        if first_stage:
+            stage_id   = first_stage["id"]
+            stage_kind = _derive_stage_kind(first_stage["advancement_mechanism"], first_stage["match_size"])
+            if stage_kind == "groups":
+                groups = conn.execute("SELECT id FROM groups WHERE event_stage_id = ?", (stage_id,)).fetchall()
+                events.generate_groups_stage(conn, stage_id, len(groups))
+            elif stage_kind == "individual_score":
+                groups = conn.execute("SELECT id FROM groups WHERE event_stage_id = ?", (stage_id,)).fetchall()
+                events.generate_individual_score_stage(conn, stage_id, max(1, len(groups)))
+            elif stage_kind == "single_elimination":
+                events.generate_single_elimination_stage(conn, stage_id)
+            events.cascade_rebuild_subsequent_stages(conn, stage_id)
+        conn.commit()
+        notify_event(event_id, "status-update")
+    else:
+        conn.rollback()
+    
+    return response
+
+
+@app.post("/api/events/{event_id}/finish")
+def finish_event(request: Request, event_id: int):
+    conn = request.state.conn
+
+    max_stage_order  = query_get_event_max_stage_order(conn, event_id)
+
+    conn.execute("BEGIN IMMEDIATE")
+
+    result, response = _set_event_stage_order(request, event_id, new_stage_order=max_stage_order+1)
 
     if result == Status.SUCCESS:
         conn.commit()
         notify_event(event_id, "status-update")
     else:
         conn.rollback()
-
+    
     return response
-
-
-@app.post("/api/events/{event_id}/start")
-def start_event(request: Request, event_id: int):
-    return _set_event_stage_order(request, event_id, new_stage_order=1)
 
 
 @app.post("/api/events/{event_id}/back-to-registration")
 def back_to_registration(request: Request, event_id: int):
-    return _set_event_stage_order(request, event_id, new_stage_order=0)
-
-
-@app.post("/api/events/{event_id}/finish")
-def finish_event(request: Request, event_id: int):
     conn = request.state.conn
-    max_stage = conn.execute(
-        "SELECT MAX(stage_order) AS max_order FROM event_stages WHERE event_id = ?",
-        (event_id,)
-    ).fetchone()
-    max_stage_order = max_stage["max_order"] if max_stage and max_stage["max_order"] else 1
-    return _set_event_stage_order(request, event_id, new_stage_order=max_stage_order+1)
+
+    conn.execute("BEGIN IMMEDIATE")
+
+    result, response = _set_event_stage_order(request, event_id, new_stage_order=0)
+
+    if result == Status.SUCCESS:
+        conn.commit()
+        notify_event(event_id, "status-update")
+    else:
+        conn.rollback()
+    
+    return response
 
 
 @app.post("/api/events/{event_id}/back-to-running")
 def back_to_running(request: Request, event_id: int):
     conn = request.state.conn
-    max_stage = conn.execute(
-        "SELECT MAX(stage_order) AS max_order FROM event_stages WHERE event_id = ?",
-        (event_id,)
-    ).fetchone()
-    max_stage_order = max_stage["max_order"] if max_stage and max_stage["max_order"] else 1
-    return _set_event_stage_order(request, event_id, max_stage_order)
+
+    max_stage_order = query_get_event_max_stage_order(conn, event_id)
+
+    conn.execute("BEGIN IMMEDIATE")
+
+    result, response = _set_event_stage_order(request, event_id, new_stage_order=max_stage_order)
+
+    if result == Status.SUCCESS:
+        conn.commit()
+        notify_event(event_id, "status-update")
+    else:
+        conn.rollback()
+    
+    return response
 
 
 @app.get("/api/events/{event_id}/players")
@@ -1659,109 +1745,42 @@ def get_event_players(request: Request, event_id: int):
 def get_event_stage(request: Request, event_id: int, stage_order: int):
     conn = request.state.conn
 
-    olympiad_badge_ctx = get_olympiad_from_request(request)
-    olympiad_id = olympiad_badge_ctx["id"]
-
     row = conn.execute(
-        "SELECT e.current_stage_order, e.version AS event_version, es.id, es.stage_order, es.advancement_mechanism, es.match_size "
-        "FROM events e "
-        "LEFT JOIN event_stages es ON es.event_id = e.id AND es.stage_order = ? "
-        "WHERE e.id = ?",
+        """
+        SELECT e.current_stage_order, e.version AS event_version, es.id, es.stage_order, es.advancement_mechanism, es.match_size
+        FROM events e
+        LEFT JOIN event_stages es ON es.event_id = e.id AND es.stage_order = ?
+        WHERE e.id = ?
+        """,
         (stage_order, event_id)
     ).fetchone()
 
-    if not row or row["id"] is None:
-        html_content = "<div class='error-banner'>Fase non trovata</div>"
-    else:
-        stage_id    = row["id"]
-        stage_kind  = _derive_stage_kind(row["advancement_mechanism"], row["match_size"])
-        stage_label = _STAGE_KIND_LABEL[stage_kind]
-
-        total_stages = conn.execute(
-            "SELECT COUNT(*) AS count FROM event_stages WHERE event_id = ?",
-            (event_id,)
-        ).fetchone()["count"]
-
-        if stage_kind == "groups":
-            stage = events.present_groups_stage(conn, stage_id)
-        elif stage_kind == "individual_score":
-            stage = events.present_individual_score_stage(conn, stage_id)
-        elif stage_kind == "single_elimination":
-            stage = events.present_single_elimination_stage(conn, stage_id, view_round=0)
-        else:
-            html_content = "<div class='error-banner'>Fase non trovata</div>"
-
-        if stage_kind in ("groups", "individual_score", "single_elimination"):
-            stage["name"] = stage_label
-            html_content = render_event_fragment(
-                "stage_content",
-                stage=stage,
-                stage_kind=stage_kind,
-                stage_order=stage_order,
-                total_stages=total_stages,
-                event_id=event_id, event_version=row["event_version"],
-            )
-
-    response = HTMLResponse(html_content)
-
-    return response
-
-
-@app.post("/api/events/{event_id}/stage/{stage_order}/go-next")
-def go_to_next_stage(request: Request, event_id: int, stage_order: int):
-    """Populate the next stage from the current groups stage standings, then return its view."""
-    conn = request.state.conn
-
-    stage_row = conn.execute(
-        "SELECT es.id, e.version AS event_version "
-        "FROM event_stages es JOIN events e ON e.id = es.event_id "
-        "WHERE es.event_id = ? AND es.stage_order = ?",
-        (event_id, stage_order)
-    ).fetchone()
-
-    if not stage_row:
-        return HTMLResponse("<div class='error-banner'>Fase non trovata</div>")
-
-    events.populate_next_stage_from_groups(conn, stage_row["id"])
-    conn.commit()
-
-    next_order = stage_order + 1
-    next_row = conn.execute(
-        "SELECT es.id, es.advancement_mechanism, es.match_size FROM event_stages es "
-        "WHERE es.event_id = ? AND es.stage_order = ?",
-        (event_id, next_order)
-    ).fetchone()
-
-    if not next_row:
-        return HTMLResponse("<div class='error-banner'>Fase successiva non trovata</div>")
+    stage_id    = row["id"]
+    stage_kind  = _derive_stage_kind(row["advancement_mechanism"], row["match_size"])
 
     total_stages = conn.execute(
-        "SELECT COUNT(*) AS count FROM event_stages WHERE event_id = ?", (event_id,)
+        "SELECT COUNT(*) AS count FROM event_stages WHERE event_id = ?",
+        (event_id,)
     ).fetchone()["count"]
 
-    next_stage_id    = next_row["id"]
-    next_stage_kind  = _derive_stage_kind(next_row["advancement_mechanism"], next_row["match_size"])
-    next_stage_label = _STAGE_KIND_LABEL[next_stage_kind]
+    if stage_kind == "groups":
+        stage = events.present_groups_stage(conn, stage_id)
+    elif stage_kind == "individual_score":
+        stage = events.present_individual_score_stage(conn, stage_id)
+    elif stage_kind == "single_elimination":
+        stage = events.present_single_elimination_stage(conn, stage_id, view_round=0)
 
-    if next_stage_kind == "groups":
-        stage = events.present_groups_stage(conn, next_stage_id)
-    elif next_stage_kind == "individual_score":
-        stage = events.present_individual_score_stage(conn, next_stage_id)
-    elif next_stage_kind == "single_elimination":
-        stage = events.present_single_elimination_stage(conn, next_stage_id, view_round=0)
-    else:
-        return HTMLResponse("<div class='error-banner'>Tipo di fase non supportato</div>")
-
-    stage["name"] = next_stage_label
+    stage["name"] = _STAGE_KIND_LABEL[stage_kind]
     html_content = render_event_fragment(
         "stage_content",
         stage=stage,
-        stage_kind=next_stage_kind,
-        stage_order=next_order,
+        stage_kind=stage_kind,
+        stage_order=stage_order,
         total_stages=total_stages,
         event_id=event_id,
-        event_version=stage_row["event_version"],
+        event_version=row["event_version"],
     )
+
     return HTMLResponse(html_content)
 
 
@@ -1784,9 +1803,11 @@ def resize_stage_groups(request: Request, event_id: int, stage_id: int, num_grou
 
     if result == Status.SUCCESS:
         stage_kind_row = conn.execute(
-            "SELECT advancement_mechanism, match_size FROM event_stages WHERE id = ?", (stage_id,)
+            "SELECT advancement_mechanism, match_size FROM event_stages WHERE id = ?",
+            (stage_id,)
         ).fetchone()
-        stage_kind = _derive_stage_kind(stage_kind_row["advancement_mechanism"], stage_kind_row["match_size"]) if stage_kind_row else "groups"
+
+        stage_kind = _derive_stage_kind(stage_kind_row["advancement_mechanism"], stage_kind_row["match_size"])
 
         if stage_kind == "individual_score":
             events.generate_individual_score_stage(conn, stage_id, num_groups)
@@ -1882,26 +1903,23 @@ def update_stage_kind(
     html_content, extra_headers = _render_operation_denied(result, olympiad_id, "events")
 
     if result == Status.SUCCESS:
-        stage_order = conn.execute(
-            "SELECT stage_order FROM event_stages WHERE id = ? AND event_id = ?",
+        existing = conn.execute(
+            "SELECT stage_order, advance_count FROM event_stages WHERE id = ? AND event_id = ?",
             (stage_id, event_id)
-        ).fetchone()["stage_order"]
+        ).fetchone()
+        stage_order = existing["stage_order"]
+        advance_count = existing["advance_count"]
 
         conn.execute("DELETE FROM event_stages WHERE id = ?", (stage_id,))
 
         new_id = conn.execute(
-            "INSERT INTO event_stages (event_id, advancement_mechanism, match_size, stage_order) VALUES (?, ?, ?, ?) RETURNING id",
-            (event_id, advancement_mechanism, match_size, stage_order)
+            "INSERT INTO event_stages (event_id, advancement_mechanism, match_size, stage_order, advance_count) VALUES (?, ?, ?, ?, ?) RETURNING id",
+            (event_id, advancement_mechanism, match_size, stage_order, advance_count)
         ).fetchone()["id"]
 
         derived_kind = _derive_stage_kind(advancement_mechanism, match_size)
-        if stage_order == 1:
-            if derived_kind == "groups":
-                events.generate_groups_stage(conn, new_id, 1)
-            elif derived_kind == "individual_score":
-                events.generate_individual_score_stage(conn, new_id, 1)
-            elif derived_kind == "single_elimination":
-                events.generate_single_elimination_stage(conn, new_id)
+        if stage_order == 1 and derived_kind != "single_elimination":
+            conn.execute("INSERT INTO groups (event_stage_id) VALUES (?)", (new_id,))
 
         html_content = _render_stages_section_html(conn, event_id)
 
@@ -1933,7 +1951,10 @@ def set_stage_num_groups(request: Request, event_id: int, stage_id: int, num_gro
     html_content, extra_headers = _render_operation_denied(result, olympiad_id, "events")
 
     if result == Status.SUCCESS:
-        events.generate_groups_stage(conn, stage_id, max(1, num_groups))
+        num_groups = max(1, num_groups)
+        conn.execute("DELETE FROM groups WHERE event_stage_id = ?", (stage_id,))
+        for _ in range(num_groups):
+            conn.execute("INSERT INTO groups (event_stage_id) VALUES (?)", (stage_id,))
         html_content = _render_stages_section_html(conn, event_id)
 
     html_content += _oob_badge_html(request, olympiad_id)
@@ -2203,13 +2224,18 @@ def add_event_stage(request: Request, event_id: int):
         ).fetchone()["m"]
 
         stage_order = max_order + 1
+        if max_order > 0:
+            conn.execute(
+                "UPDATE event_stages SET advance_count = MAX(1, advance_count) WHERE event_id = ? AND stage_order = ?",
+                (event_id, max_order)
+            )
         stage_id = conn.execute(
-            "INSERT INTO event_stages (event_id, advancement_mechanism, match_size, stage_order) VALUES (?, ?, ?, ?) RETURNING id",
+            "INSERT INTO event_stages (event_id, advancement_mechanism, match_size, stage_order, advance_count) VALUES (?, ?, ?, ?, 0) RETURNING id",
             (event_id, advancement_mechanism, match_size, stage_order)
         ).fetchone()["id"]
 
         if stage_order == 1:
-            events.generate_groups_stage(conn, stage_id, 1)
+            conn.execute("INSERT INTO groups (event_stage_id) VALUES (?)", (stage_id,))
 
         html_content = _render_stages_section_html(conn, event_id)
 
@@ -2265,6 +2291,12 @@ def remove_event_stage(request: Request, event_id: int, stage_id: int):
                     events.generate_individual_score_stage(conn, stage_id, max(1, len(groups)))
                 elif first_stage_kind == "single_elimination":
                     events.generate_single_elimination_stage(conn, stage_id)
+
+        if remaining:
+            conn.execute(
+                "UPDATE event_stages SET advance_count = 0 WHERE id = ?",
+                (remaining[-1]["id"],)
+            )
 
         conn.execute("UPDATE events SET version = version + 1 WHERE id = ?", (event_id,))
 
@@ -2330,31 +2362,6 @@ def enroll_participant(request: Request, event_id: int, participant_id: int):
             (event_id, participant_id)
         )
 
-        current_stage_order = conn.execute(
-            "SELECT current_stage_order FROM events WHERE id = ?", (event_id,)
-        ).fetchone()["current_stage_order"]
-        assert current_stage_order == 0
-
-        first_stage = conn.execute(
-            "SELECT id, advancement_mechanism, match_size FROM event_stages WHERE event_id = ? AND stage_order = 1",
-            (event_id,)
-        ).fetchone()
-        if first_stage:
-            stage_id   = first_stage["id"]
-            stage_kind = _derive_stage_kind(first_stage["advancement_mechanism"], first_stage["match_size"])
-            if stage_kind == "groups":
-                groups = conn.execute(
-                    "SELECT id FROM groups WHERE event_stage_id = ?", (stage_id,)
-                ).fetchall()
-                events.generate_groups_stage(conn, stage_id, len(groups))
-            elif stage_kind == "individual_score":
-                groups = conn.execute(
-                    "SELECT id FROM groups WHERE event_stage_id = ?", (stage_id,)
-                ).fetchall()
-                events.generate_individual_score_stage(conn, stage_id, max(1, len(groups)))
-            elif stage_kind == "single_elimination":
-                events.generate_single_elimination_stage(conn, stage_id)
-
         html_content = _render_event_players_section_html(conn, event_id, olympiad_id)
 
     response = HTMLResponse(html_content)
@@ -2399,31 +2406,6 @@ def unenroll_participant(request: Request, event_id: int, participant_id: int):
             (event_id, participant_id)
         )
 
-        current_stage_order = conn.execute(
-            "SELECT current_stage_order FROM events WHERE id = ?", (event_id,)
-        ).fetchone()["current_stage_order"]
-        assert current_stage_order == 0
-
-        first_stage = conn.execute(
-            "SELECT id, advancement_mechanism, match_size FROM event_stages WHERE event_id = ? AND stage_order = 1",
-            (event_id,)
-        ).fetchone()
-        if first_stage:
-            stage_id   = first_stage["id"]
-            stage_kind = _derive_stage_kind(first_stage["advancement_mechanism"], first_stage["match_size"])
-            if stage_kind == "groups":
-                groups = conn.execute(
-                    "SELECT id FROM groups WHERE event_stage_id = ?", (stage_id,)
-                ).fetchall()
-                events.generate_groups_stage(conn, stage_id, len(groups))
-            elif stage_kind == "individual_score":
-                groups = conn.execute(
-                    "SELECT id FROM groups WHERE event_stage_id = ?", (stage_id,)
-                ).fetchall()
-                events.generate_individual_score_stage(conn, stage_id, max(1, len(groups)))
-            elif stage_kind == "single_elimination":
-                events.generate_single_elimination_stage(conn, stage_id)
-
         html_content = _render_event_players_section_html(conn, event_id, olympiad_id)
 
     # html_content += _oob_badge_html(request, olympiad_id)
@@ -2437,8 +2419,6 @@ def unenroll_participant(request: Request, event_id: int, participant_id: int):
         conn.rollback()
 
     return response
-
-@app.post("/api/events/{event_id}/stage/{}")
 
 # ---------------------------------------------------------------------------
 # Auth
