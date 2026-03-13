@@ -3,8 +3,10 @@
     <div class="modal-content" _="on click halt the event's bubbling">
         <p>L'olimpiade è stata rinominata da un altro admin.</p>
         <div class="modal-actions">
-            <button _="on click trigger closeModal on body">
-                Chiudi
+            <button hx-get="/api/olympiads"
+                    hx-target="#main-content"
+                    _="on htmx:afterRequest trigger closeModal on body">
+                Vai alle olimpiadi
             </button>
         </div>
     </div>

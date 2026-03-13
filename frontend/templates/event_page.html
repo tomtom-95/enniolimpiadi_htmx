@@ -18,16 +18,6 @@
          hx-target="#event-page"
          hx-swap="outerHTML">
         <span hidden
-              hx-trigger="sse:olympiad-deleted-{{ olympiad_id }}"
-              hx-get="/api/events/{{ event_id }}/olympiad-deleted-notice"
-              hx-target="#modal-container"
-              hx-swap="innerHTML"></span>
-        <span hidden
-              hx-trigger="sse:olympiad-renamed-{{ olympiad_id }}"
-              hx-get="/api/events/{{ event_id }}/olympiad-renamed-notice"
-              hx-target="#modal-container"
-              hx-swap="innerHTML"></span>
-        <span hidden
               hx-trigger="sse:event-deleted"
               hx-get="/api/events/{{ event_id }}/deleted-notice"
               hx-target="#modal-container"

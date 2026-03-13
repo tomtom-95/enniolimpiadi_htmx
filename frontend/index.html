@@ -20,7 +20,8 @@
             <div id="olympiad-badge"
                 data-id="0"
                 data-version="0"
-                data-name="Olympiad badge">
+                data-name="Olympiad badge"
+                data-tab-id="{{ tab_id }}">
                 Olympiad badge
             </div>
         </div>
@@ -39,6 +40,7 @@
             </div>
         </div>
         <div id="modal-container"></div>
+        <div id="olympiad-sse-link"></div>
     </body>
     <script>
         document.body.addEventListener('htmx:configRequest', function(evt) {
@@ -46,6 +48,7 @@
             evt.detail.headers['X-Olympiad-Id'] = badge.dataset.id;
             evt.detail.headers['X-Olympiad-Version'] = badge.dataset.version;
             evt.detail.headers['X-Olympiad-Name'] = badge.dataset.name;
+            evt.detail.headers['X-Tab-Id'] = badge.dataset.tabId;
         });
 
         // --- PIN auth: intercept and re-trigger after validation ---

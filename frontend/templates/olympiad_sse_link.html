@@ -1,0 +1,19 @@
+{% if olympiad_id != 0 %}
+      <div id="olympiad-sse-link"
+           hx-swap-oob="true"
+           hx-ext="sse"
+           sse-connect="/api/olympiads/{{ olympiad_id }}/sse?tab_id={{ tab_id }}">
+      <span hidden
+            hx-trigger="sse:olympiad-deleted"
+            hx-get="/api/olympiads/{{ olympiad_id }}/deleted-notice"
+            hx-target="#modal-container"
+            hx-swap="innerHTML"></span>
+      <span hidden
+            hx-trigger="sse:olympiad-renamed"
+            hx-get="/api/olympiads/{{ olympiad_id }}/renamed-notice"
+            hx-target="#modal-container"
+            hx-swap="innerHTML"></span>
+      </div>
+{% else %}
+      <div id="olympiad-sse-link" hx-swap-oob="true"></div>
+{% endif %}
