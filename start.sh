@@ -22,22 +22,23 @@ pip install -r "$SCRIPT_DIR/backend/requirements.txt" -q
 cd "$SCRIPT_DIR/backend"
 
 case "$1" in
-    test)
-        # Use test database
-        export DATABASE_PATH="$SCRIPT_DIR/backend/testdb.db"
-
-        pytest
-        ;;
     run)
         # Start FastAPI backend
         python -m src.main &
         BACKEND_PID=$!
 
+        # Wait for the app to be ready, then seed
+        echo "Waiting for app to be ready..."
+        until curl -sf http://localhost:8000/health > /dev/null; do
+            sleep 0.2
+        done
+        python "$SCRIPT_DIR/seed.py" && echo "Seed done"
+
         # Wait for the process
         wait
         ;;
     *)
-        echo "Usage: $0 {run|test|stop}"
+        echo "Usage: $0 {run}"
         exit 1
         ;;
 esac
