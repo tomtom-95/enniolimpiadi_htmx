@@ -26,17 +26,12 @@
 
 <div id="entity-list">
     {% for item in items %}
-        {% if entities == "olympiads" %}
-            {% set hx_target = "#olympiads-" ~ item.id %}
-        {% else %}
-            {% set hx_target = "#main-content" %}
-        {% endif %}
         <div id="{{ entities }}-{{ item.id }}"
              class="entity-element"
              hx-get="/api/{{ entities }}/{{ item.id }}?name={{ item.name }}"
-             hx-target="{{ hx_target }}"
+             hx-target="#main-content"
              hx-trigger="click"
-             hx-swap="{% if entities == 'olympiads' %}outerHTML{% else %}innerHTML{% endif %}">
+             hx-swap="innerHTML">
             <div class="item">{{ item.name }}</div>
             <div class="item-icons">
                 <button class="item-rename"
@@ -66,75 +61,75 @@
     ============================================================
     BLOCK: entity_element
     A single entity row rendered standalone.
-    Expects: item, entities, hx_target
+    Expects: item, entities
     ============================================================
 #}
 {% block entity_element %}
-<div id="{{ entities }}-{{ item.id }}"
-     class="entity-element"
-     hx-get="/api/{{ entities }}/{{ item.id }}?name={{ item.name }}"
-     hx-target="{{ hx_target }}"
-     hx-trigger="click"
-     hx-swap="{% if entities == 'olympiads' %}outerHTML{% else %}innerHTML{% endif %}">
-    <div class="item">{{ item.name }}</div>
-    <div class="item-icons">
-        <button class="item-rename"
-                aria-label="Rename"
-                hx-get="/api/{{ entities }}/{{ item.id }}/edit?name={{ item.name }}"
-                hx-target="#{{ entities }}-{{ item.id }}"
-                hx-trigger="click"
-                hx-swap="outerHTML"
-                hx-on:click="event.stopPropagation()">
-        </button>
-        <button class="item-delete"
-                aria-label="Delete"
-                hx-delete="/api/{{ entities }}/{{ item.id }}?name={{ item.name }}"
-                hx-target="#{{ entities }}-{{ item.id }}"
-                hx-trigger="click"
-                hx-swap="outerHTML"
-                hx-on:click="event.stopPropagation()">
-        </button>
+    <div id="{{ entities }}-{{ item.id }}"
+        class="entity-element"
+        hx-get="/api/{{ entities }}/{{ item.id }}?name={{ item.name }}"
+        hx-target="#main-content"
+        hx-trigger="click"
+        hx-swap="innerHTML">
+        <div class="item">{{ item.name }}</div>
+        <div class="item-icons">
+            <button class="item-rename"
+                    aria-label="Rename"
+                    hx-get="/api/{{ entities }}/{{ item.id }}/edit?name={{ item.name }}"
+                    hx-target="#{{ entities }}-{{ item.id }}"
+                    hx-trigger="click"
+                    hx-swap="outerHTML"
+                    hx-on:click="event.stopPropagation()">
+            </button>
+            <button class="item-delete"
+                    aria-label="Delete"
+                    hx-delete="/api/{{ entities }}/{{ item.id }}?name={{ item.name }}"
+                    hx-target="#{{ entities }}-{{ item.id }}"
+                    hx-trigger="click"
+                    hx-swap="outerHTML"
+                    hx-on:click="event.stopPropagation()">
+            </button>
+        </div>
     </div>
-</div>
 {% endblock %} {# entity_element #}
 
 {#
     ============================================================
     BLOCK: entity_renamed_oob
     Concurrent-rename notice banner + the entity row below it.
-    Expects: item, entities, hx_target
+    Expects: item, entities
     ============================================================
 #}
 {% block entity_renamed_oob %}
-<div class="entity-rename-message"
-     _="on click add .removing to me then wait 200ms then remove me">
-    <span>Elemento rinominato "{{ item.name }}" da un altro admin</span>
-    <button class="dismiss-btn" type="button">Ok</button>
-</div>
-<div id="{{ entities }}-{{ item.id }}"
-     class="entity-element"
-     hx-get="/api/{{ entities }}/{{ item.id }}?name={{ item.name }}"
-     hx-target="{{ hx_target }}"
-     hx-trigger="click"
-     hx-swap="{% if entities == 'olympiads' %}outerHTML{% else %}innerHTML{% endif %}">
-    <div class="item">{{ item.name }}</div>
-    <div class="item-icons">
-        <button class="item-rename"
-                aria-label="Rename"
-                hx-get="/api/{{ entities }}/{{ item.id }}/edit?name={{ item.name }}"
-                hx-target="#{{ entities }}-{{ item.id }}"
-                hx-trigger="click"
-                hx-swap="outerHTML"
-                hx-on:click="event.stopPropagation()">
-        </button>
-        <button class="item-delete"
-                aria-label="Delete"
-                hx-delete="/api/{{ entities }}/{{ item.id }}?name={{ item.name }}"
-                hx-target="#{{ entities }}-{{ item.id }}"
-                hx-trigger="click"
-                hx-swap="outerHTML"
-                hx-on:click="event.stopPropagation()">
-        </button>
+    <div class="entity-rename-message"
+         _="on click add .removing to me then wait 200ms then remove me">
+        <span>Elemento rinominato "{{ item.name }}" da un altro admin</span>
+        <button class="dismiss-btn" type="button">Ok</button>
     </div>
-</div>
+    <div id="{{ entities }}-{{ item.id }}"
+         class="entity-element"
+         hx-get="/api/{{ entities }}/{{ item.id }}?name={{ item.name }}"
+         hx-target="#main-content"
+         hx-trigger="click"
+         hx-swap="innerHTML">
+        <div class="item">{{ item.name }}</div>
+        <div class="item-icons">
+            <button class="item-rename"
+                    aria-label="Rename"
+                    hx-get="/api/{{ entities }}/{{ item.id }}/edit?name={{ item.name }}"
+                    hx-target="#{{ entities }}-{{ item.id }}"
+                    hx-trigger="click"
+                    hx-swap="outerHTML"
+                    hx-on:click="event.stopPropagation()">
+            </button>
+            <button class="item-delete"
+                    aria-label="Delete"
+                    hx-delete="/api/{{ entities }}/{{ item.id }}?name={{ item.name }}"
+                    hx-target="#{{ entities }}-{{ item.id }}"
+                    hx-trigger="click"
+                    hx-swap="outerHTML"
+                    hx-on:click="event.stopPropagation()">
+            </button>
+        </div>
+    </div>
 {% endblock %} {# entity_renamed_oob #}

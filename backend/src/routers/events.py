@@ -947,20 +947,11 @@ def select_event(request: Request, event_id: int, event_name: str = Query(None, 
 
     olympiad_badge_ctx = dep.get_olympiad_from_request(request)
     olympiad_id = olympiad_badge_ctx["id"]
-    olympiad_name = olympiad_badge_ctx["name"]
-
-    hx_target = f"#{request.headers.get('HX-Target')}"
-
-    assert olympiad_id != 0
 
     result = dep.Status.SUCCESS
-    if not dep.check_olympiad_exist(request, olympiad_id):
-        result = dep.Status.OLYMPIAD_NOT_FOUND
-    if result == dep.Status.SUCCESS and not dep.check_olympiad_name(request, olympiad_id, olympiad_name):
-        result = dep.Status.OLYMPIAD_RENAMED
     if result == dep.Status.SUCCESS and not dep.check_entity_exist(request, "events", event_id):
         result = dep.Status.ENTITY_NOT_FOUND
-    if result == dep.Status.SUCCESS and event_name is not None and not dep.check_entity_name(request, "events", event_id, event_name):
+    if result == dep.Status.SUCCESS and not dep.check_entity_name(request, "events", event_id, event_name):
         result = dep.Status.ENTITY_RENAMED
 
     html_content, extra_headers = dep._render_operation_denied(result, olympiad_id, "events")
@@ -972,7 +963,7 @@ def select_event(request: Request, event_id: int, event_name: str = Query(None, 
     elif result == dep.Status.ENTITY_RENAMED:
         event = conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
         event_data = {"id": event_id, "name": event["name"], "version": event["version"]}
-        html_content = dep.render_entity_fragment("entity_renamed_oob", entities="events", item=event_data, hx_target=hx_target)
+        html_content = dep.render_entity_fragment("entity_renamed_oob", entities="events", item=event_data)
         extra_headers["HX-Retarget"] = f"#events-{event_id}"
         extra_headers["HX-Reswap"] = "outerHTML"
     elif result == dep.Status.SUCCESS:

@@ -231,12 +231,18 @@ def _oob_badge_html(request, olympiad_id: int):
 
     if olympiad_id == olympiad_badge_ctx["id"]:
         if not olympiad:
-            return templates.get_template("olympiad_badge.html").render(olympiad=sentinel_olympiad_badge, tab_id=tab_id, oob=True)
+            return templates.get_template("olympiad_badge.html").render(
+                olympiad=sentinel_olympiad_badge, tab_id=tab_id, oob=True
+            )
         else:
             olympiad_data = {"id": olympiad["id"], "name": olympiad["name"], "version": olympiad["version"]}
-            return templates.get_template("olympiad_badge.html").render(olympiad=olympiad_data, tab_id=tab_id, oob=True)
+            return templates.get_template("olympiad_badge.html").render(
+                olympiad=olympiad_data, tab_id=tab_id, oob=True
+            )
     else:
-        return templates.get_template("olympiad_badge.html").render(olympiad=olympiad_badge_ctx, tab_id=tab_id, oob=True)
+        return templates.get_template("olympiad_badge.html").render(
+            olympiad=olympiad_badge_ctx, tab_id=tab_id, oob=True
+        )
 
 
 def _render_operation_denied(result, olympiad_id, entities):
