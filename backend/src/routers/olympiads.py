@@ -76,7 +76,7 @@ def create_olympiad(request: Request, pin: str = Form(...), name: str = Form(...
         extra_headers["HX-Reswap"] = "innerHTML"
 
     if result == dep.Status.NAME_DUPLICATION:
-        html_content = dep.templates.get_template("olympiad_name_duplicate.html").render()
+        html_content = dep.render_modal_fragment("name_duplicate", entities="olympiads")
         extra_headers["HX-Retarget"] = "#modal-container"
         extra_headers["HX-Reswap"] = "innerHTML"
 
@@ -91,8 +91,10 @@ def create_olympiad(request: Request, pin: str = Form(...), name: str = Form(...
             (session_id, olympiad_id)
         )
         item = {"id": olympiad_id, "name": name}
-        html_content = dep.render_entity_fragment("entity_element", item=item, entities="olympiads")
-        html_content += '<div id="modal-container" hx-swap-oob="innerHTML"></div>'
+        html_content = "".join([
+            dep.templates.env.get_template("entity_macros.html").module.entity_element(item, "olympiads"),
+            '<div id="modal-container" hx-swap-oob="innerHTML"></div>'
+        ])
 
     response = HTMLResponse(html_content)
     response.headers.update(extra_headers)
@@ -118,10 +120,13 @@ def select_olympiad(request: Request, olympiad_id: int, olympiad_name: str = Que
     extra_headers = {}
 
     if result == dep.Status.OLYMPIAD_NOT_FOUND:
-        html_content = dep.templates.get_template("entity_deleted_oob.html").render()
-
-    olympiad = conn.execute("SELECT * FROM olympiads WHERE id = ?", (olympiad_id,)).fetchone()
-    olympiad_data = {"id": olympiad_id, "name": olympiad["name"]}
+        extra_headers["HX-Retarget"] = f"#olympiads-{olympiad_id}"
+        extra_headers["HX-Reswap"] = "outerHTML"
+        html_content = dep.render_entity_fragment("entity_deleted_oob")
+    
+    if result != dep.Status.OLYMPIAD_NOT_FOUND:
+        olympiad = conn.execute("SELECT * FROM olympiads WHERE id = ?", (olympiad_id,)).fetchone()
+        olympiad_data = {"id": olympiad_id, "name": olympiad["name"]}
 
     if result == dep.Status.OLYMPIAD_RENAMED:
         extra_headers["HX-Retarget"] = f"#olympiads-{olympiad_id}"
@@ -133,7 +138,20 @@ def select_olympiad(request: Request, olympiad_id: int, olympiad_name: str = Que
     if result == dep.Status.SUCCESS:
         tab_id = request.headers.get("X-Tab-Id", "")
 
-        html_content = dep.templates.get_template("olympiad_page.html").render()
+        events = conn.execute(
+            "SELECT id, name FROM events WHERE olympiad_id = ? ORDER BY name",
+            (olympiad_id,)
+        ).fetchall()
+        players = conn.execute(
+            "SELECT id, name FROM players WHERE olympiad_id = ? ORDER BY name",
+            (olympiad_id,)
+        ).fetchall()
+        events = [{"id": r["id"], "name": r["name"]} for r in events]
+        players = [{"id": r["id"], "name": r["name"]} for r in players]
+
+        html_content = dep.templates.get_template("olympiad_page.html").render(
+            olympiad=olympiad_data, events=events, players=players
+        )
         html_content += dep.templates.get_template("olympiad_badge.html").render(
             olympiad=olympiad_data, tab_id=tab_id, oob=True
         )
@@ -185,7 +203,7 @@ def rename_olympiad(
     extra_headers = {}
 
     if result == dep.Status.OLYMPIAD_NOT_FOUND:
-        html_content = dep.templates.get_template("entity_deleted_oob.html").render()
+        html_content = dep.render_entity_fragment("entity_deleted_oob")
 
     if result == dep.Status.OLYMPIAD_RENAMED:
         olympiad_badge_ctx = {"id": olympiad_id, "name": olympiad["name"], "version": olympiad["version"]}
@@ -200,7 +218,7 @@ def rename_olympiad(
     if result == dep.Status.NAME_DUPLICATION:
         extra_headers["HX-Retarget"] = "#modal-container"
         extra_headers["HX-Reswap"] = "innerHTML"
-        html_content = dep.templates.get_template("olympiad_name_duplicate.html").render()
+        html_content = dep.render_modal_fragment("name_duplicate", entities="olympiads")
 
     if result == dep.Status.SUCCESS:
         updated_row = conn.execute(
@@ -208,8 +226,10 @@ def rename_olympiad(
             (olympiad_new_name, olympiad_id)
         ).fetchone()
         item = {"id": olympiad_id, "name": updated_row["name"]}
-        html_content = dep.render_entity_fragment("entity_element", item=item, entities="olympiads")
-        html_content += dep._oob_badge_html(request, olympiad_id)
+        html_content = "".join([
+            dep.templates.env.get_template("entity_macros.html").module.entity_element(item, "olympiads"),
+            dep._oob_badge_html(request, olympiad_id)
+        ])
 
     response = HTMLResponse(html_content)
     response.headers.update(extra_headers)
@@ -240,7 +260,7 @@ def delete_olympiad(request: Request, olympiad_id: int, olympiad_name: str = Que
 
     extra_headers = {}
     if result == dep.Status.OLYMPIAD_NOT_FOUND:
-        html_content = dep.templates.get_template("entity_deleted_oob.html").render()
+        html_content = dep.render_entity_fragment("entity_deleted_oob")
     elif result == dep.Status.OLYMPIAD_RENAMED:
         olympiad_badge_ctx = {"id": olympiad_id, "name": olympiad["name"], "version": olympiad["version"]}
         html_content = dep.render_entity_fragment("entity_renamed_oob", entities="olympiads", item=olympiad_badge_ctx)
@@ -274,7 +294,7 @@ def delete_olympiad(request: Request, olympiad_id: int, olympiad_name: str = Que
 @router.get("/{olympiad_id}/deleted-notice")
 def get_olympiad_deleted_notice(request: Request, olympiad_id: int):
     tab_id = request.headers.get("X-Tab-Id", "")
-    html_content = dep.templates.get_template("olympiad_deleted_modal.html").render()
+    html_content = dep.render_modal_fragment("olympiad_deleted")
     html_content += dep.templates.get_template("olympiad_badge.html").render(
         olympiad=dep.sentinel_olympiad_badge, tab_id=tab_id, oob=True
     )
@@ -289,7 +309,7 @@ def get_olympiad_renamed_notice(request: Request, olympiad_id: int):
         "SELECT id, name, version FROM olympiads WHERE id = ?", (olympiad_id,)
     ).fetchone()
     olympiad = {"id": olympiad_data["id"], "name": olympiad_data["name"], "version": olympiad_data["version"]}
-    html_content = dep.templates.get_template("olympiad_renamed_modal.html").render()
+    html_content = dep.render_modal_fragment("olympiad_renamed")
     html_content += dep.templates.get_template("olympiad_badge.html").render(
         olympiad=olympiad, tab_id=tab_id, oob=True
     )

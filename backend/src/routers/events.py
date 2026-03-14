@@ -957,7 +957,7 @@ def select_event(request: Request, event_id: int, event_name: str = Query(None, 
     html_content, extra_headers = dep._render_operation_denied(result, olympiad_id, "events")
 
     if result == dep.Status.ENTITY_NOT_FOUND:
-        html_content = dep.templates.get_template("entity_deleted_oob.html").render()
+        html_content = dep.render_entity_fragment("entity_deleted_oob")
         extra_headers["HX-Retarget"] = f"#events-{event_id}"
         extra_headers["HX-Reswap"] = "outerHTML"
     elif result == dep.Status.ENTITY_RENAMED:
@@ -1975,12 +1975,12 @@ def get_event_title(request: Request, event_id: int):
 
 @router.get("/{event_id}/deleted-notice")
 def get_event_deleted_notice(request: Request, event_id: int):
-    return dep.templates.TemplateResponse(request, "event_deleted_modal.html", {})
+    return HTMLResponse(dep.render_modal_fragment("event_deleted"))
 
 
 @router.get("/{event_id}/olympiad-deleted-notice")
 def get_event_olympiad_deleted_notice(request: Request, event_id: int):
-    html_content = dep.templates.get_template("olympiad_deleted_modal.html").render()
+    html_content = dep.render_modal_fragment("olympiad_deleted")
     html_content += dep.templates.get_template("olympiad_badge.html").render(olympiad=dep.sentinel_olympiad_badge, oob=True)
     return HTMLResponse(html_content)
 
@@ -1995,7 +1995,7 @@ def get_event_olympiad_renamed_notice(request: Request, event_id: int):
     olympiad_name = olympiad_data["name"]
     olympiad_version = olympiad_data["version"]
 
-    html_content = dep.templates.get_template("olympiad_renamed_modal.html").render()
+    html_content = dep.render_modal_fragment("olympiad_renamed")
     olympiad = {"id": olympiad_id, "name": olympiad_name, "version": olympiad_version}
     html_content += dep.templates.get_template("olympiad_badge.html").render(olympiad=olympiad, oob=True)
     return HTMLResponse(html_content)

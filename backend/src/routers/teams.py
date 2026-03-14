@@ -55,7 +55,7 @@ def create_team(request: Request, name: str = Form(...)):
         )
 
         item = {"id": inserted_row["id"], "name": inserted_row["name"], "version": inserted_row["version"]}
-        html_content = dep.render_entity_fragment("entity_element", item=item, entities="teams", hx_target="#main-content")
+        html_content = dep.templates.env.get_template("entity_macros.html").module.entity_element(item, "teams")
         extra_headers["HX-Retarget"] = "#entity-list"
         extra_headers["HX-Reswap"] = "afterbegin"
 

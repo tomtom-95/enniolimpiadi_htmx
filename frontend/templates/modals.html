@@ -1,0 +1,183 @@
+{#
+    ============================================================
+    modals.html — all informational/error modal fragments.
+    Render with dep.render_modal_fragment(block_name, **ctx)
+    ============================================================
+#}
+
+{#
+    BLOCK: olympiad_deleted
+#}
+{% block olympiad_deleted %}
+<div id="modal" _="on closeModal from body remove me">
+    <div class="modal-underlay" _="on htmx:afterRequest trigger closeModal on body"></div>
+    <div class="modal-content" _="on click halt the event's bubbling">
+        <p>L'olimpiade selezionata è stata eliminata da un altro admin.</p>
+        <div class="modal-actions">
+            <button hx-get="/api/olympiads"
+                    hx-target="#main-content"
+                    _="on htmx:afterRequest trigger closeModal on body">
+                Vai alle olimpiadi
+            </button>
+        </div>
+    </div>
+</div>
+{% endblock %} {# olympiad_deleted #}
+
+{#
+    BLOCK: olympiad_renamed
+#}
+{% block olympiad_renamed %}
+<div id="modal" _="on closeModal from body remove me">
+    <div class="modal-underlay" _="on click trigger closeModal on body"></div>
+    <div class="modal-content" _="on click halt the event's bubbling">
+        <p>L'olimpiade è stata rinominata da un altro admin.</p>
+        <div class="modal-actions">
+            <button hx-get="/api/olympiads"
+                    hx-target="#main-content"
+                    _="on htmx:afterRequest trigger closeModal on body">
+                Vai alle olimpiadi
+            </button>
+        </div>
+    </div>
+</div>
+{% endblock %} {# olympiad_renamed #}
+
+{#
+    BLOCK: event_deleted
+#}
+{% block event_deleted %}
+<div id="modal" _="on closeModal from body remove me">
+    <div class="modal-underlay" _="on htmx:afterRequest trigger closeModal on body"></div>
+    <div class="modal-content" _="on click halt the event's bubbling">
+        <p>Questo evento è stato eliminato da un altro admin.</p>
+        <div class="modal-actions">
+            <button hx-get="/api/events"
+                    hx-target="#main-content"
+                    _="on htmx:afterRequest trigger closeModal on body">
+                Torna agli eventi
+            </button>
+        </div>
+    </div>
+</div>
+<div id="event-page" hx-swap-oob="outerHTML:#event-page"></div>
+{% endblock %} {# event_deleted #}
+
+{#
+    BLOCK: olympiad_not_found
+#}
+{% block olympiad_not_found %}
+<div id="modal" _="on closeModal from body remove me">
+    <div class="modal-underlay" _="on htmx:afterRequest trigger closeModal on body"></div>
+    <div class="modal-content" _="on click halt the event's bubbling">
+        <p>L'olimpiade su cui stavi lavorando o che hai selezionato è stata eliminata da qualche admin</p>
+        <div class="modal-actions">
+            <button hx-get="/api/olympiads"
+                    hx-target="#main-content"
+                    _="on htmx:afterRequest trigger closeModal on body">
+                Aggiorna l'applicazione
+            </button>
+        </div>
+    </div>
+</div>
+{% endblock %} {# olympiad_not_found #}
+
+{#
+    BLOCK: olympiad_name_changed
+#}
+{% block olympiad_name_changed %}
+<div id="modal" _="on closeModal from body remove me">
+    <div class="modal-underlay" _="on htmx:afterRequest trigger closeModal on body"></div>
+    <div class="modal-content" _="on click halt the event's bubbling">
+        <p>Il nome dell'olimpiade su cui stavi lavorando o che hai cliccato è stato modificato da qualche admin</p>
+        <div class="modal-actions">
+            <button hx-get="/api/olympiads"
+                    hx-target="#main-content"
+                    _="on htmx:afterRequest trigger closeModal on body">
+                Aggiorna l'applicazione
+            </button>
+        </div>
+    </div>
+</div>
+{% endblock %} {# olympiad_name_changed #}
+
+{#
+    BLOCK: select_olympiad_required
+#}
+{% block select_olympiad_required %}
+<div id="modal" _="on closeModal from body remove me">
+    <div class="modal-underlay" _="on click trigger closeModal on body"></div>
+    <div class="modal-content" _="on click halt the event's bubbling">
+        <p>Seleziona un'olimpiade per vedere gli elementi associati</p>
+        <div class="modal-actions">
+            <button hx-get="/api/olympiads"
+                    hx-target="#main-content"
+                    _="on click trigger closeModal on body">
+                Seleziona un'olimpiade
+            </button>
+        </div>
+    </div>
+</div>
+{% endblock %} {# select_olympiad_required #}
+
+{#
+    BLOCK: name_duplicate
+    Expects: entities (e.g. "olympiads", "players", ...)
+#}
+{% block name_duplicate %}
+<div id="modal" _="on closeModal from body remove me">
+    <div class="modal-underlay" _="on click trigger closeModal on body"></div>
+    <div class="modal-content" _="on click halt the event's bubbling">
+        <h3>Errore</h3>
+        <p>{% if entities == "olympiads" %}Un'olimpiade{% else %}Un elemento{% endif %} con questo nome esiste già.</p>
+        <div class="modal-actions">
+            <button type="button" class="btn-cancel" _="on click trigger closeModal on body">
+                Chiudi
+            </button>
+            <button type="button" class="btn-submit"
+                    hx-get="/api/{{ entities }}"
+                    hx-target="#main-content"
+                    _="on click trigger closeModal on body">
+                Ricarica pagina
+            </button>
+        </div>
+    </div>
+</div>
+{% endblock %} {# name_duplicate #}
+
+{#
+    BLOCK: previous_stage_incomplete
+#}
+{% block previous_stage_incomplete %}
+<div id="modal" _="on closeModal from body remove me">
+    <div class="modal-underlay" _="on click trigger closeModal on body"></div>
+    <div class="modal-content" _="on click halt the event's bubbling">
+        <p>Completa prima tutte le partite della fase precedente prima di inserire i punteggi di questa fase.</p>
+        <div class="modal-actions">
+            <button _="on click trigger closeModal on body">
+                Chiudi
+            </button>
+        </div>
+    </div>
+</div>
+{% endblock %} {# previous_stage_incomplete #}
+
+{#
+    BLOCK: operation_failed
+    Expects: result (string error message)
+#}
+{% block operation_failed %}
+<div id="modal" _="on closeModal from body remove me">
+    <div class="modal-underlay" _="on click trigger closeModal on body"></div>
+    <div class="modal-content" _="on click halt the event's bubbling">
+        <p>Operazione non riuscita. {{ result }}</p>
+        <div class="modal-actions">
+            <button hx-get="/api/olympiads"
+                    hx-target="#main-content"
+                    _="on click trigger closeModal on body">
+                Chiudi
+            </button>
+        </div>
+    </div>
+</div>
+{% endblock %} {# operation_failed #}

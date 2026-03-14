@@ -95,7 +95,7 @@ def validate_pin(request: Request, pin: str = Form(...), olympiad_id: int = Form
 
     extra_headers = {}
     if result == dep.Status.OLYMPIAD_NOT_FOUND:
-        html_content = dep.templates.get_template("olympiad_not_found.html").render()
+        html_content = dep.render_modal_fragment("olympiad_not_found")
         extra_headers["HX-Retarget"] = "#modal-container"
         extra_headers["HX-Reswap"] = "innerHTML"
     elif result == dep.Status.INVALID_PIN:

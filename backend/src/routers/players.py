@@ -55,11 +55,11 @@ def create_player(request: Request, name: str = Form(...)):
         )
 
         item = {"id": inserted_row["id"], "name": inserted_row["name"], "version": inserted_row["version"]}
-        html_content = dep.render_entity_fragment("entity_element", item=item, entities="players", hx_target="#main-content")
+        html_content = dep.templates.env.get_template("entity_macros.html").module.entity_element(item, "players")
         extra_headers["HX-Retarget"] = "#entity-list"
         extra_headers["HX-Reswap"] = "afterbegin"
 
-    html_content += dep._oob_badge_html(request, olympiad_id)
+    html_content = "".join([html_content, dep._oob_badge_html(request, olympiad_id)])
     response = HTMLResponse(html_content)
     response.headers.update(extra_headers)
 

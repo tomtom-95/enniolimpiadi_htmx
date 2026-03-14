@@ -655,34 +655,41 @@ body {
 /*
  * Entity rename message
  */
+.entity-rename-wrapper {
+    position: relative;
+    margin-bottom: 0.5rem;
+}
+
+.entity-rename-wrapper .entity-element {
+    margin-bottom: 0;
+}
+
 .entity-rename-message {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    border-radius: 8px;
     padding: 0.4rem 0.5rem;
-    margin-bottom: 0.1rem;
     background-color: #17a2b8;
     border-left: 4px solid #17a2b8;
     color: #ffffff;
     font-weight: 500;
     font-style: italic;
-    flex-shrink: 0;
     overflow: hidden;
     opacity: 1;
-    transition: opacity 200ms ease-out, margin-bottom 200ms ease-out, padding 200ms ease-out;
+    transition: opacity 200ms ease-out;
 }
 
 .entity-rename-message.removing {
     opacity: 0;
-    margin-bottom: 0;
-    padding-top: 0;
-    padding-bottom: 0;
 }
 
 .entity-rename-message span {
     white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    overflow-x: auto;
     flex: 1;
     min-width: 0;
 }
@@ -704,6 +711,30 @@ body {
 
 .entity-rename-message .dismiss-btn:hover {
     background-color: rgba(255, 255, 255, 0.15);
+}
+
+/*
+ * Olympiad page layout
+ */
+.olympiad-page {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 1rem;
+}
+
+.olympiad-page-section-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    padding-bottom: 0.25rem;
+}
+
+.olympiad-page-empty {
+    font-size: 0.875rem;
+    color: #9995a8;
+    font-style: italic;
+    padding: 0.25rem 0;
 }
 
 /*

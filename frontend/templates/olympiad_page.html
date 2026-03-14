@@ -1,2 +1,41 @@
-A presentation page of the olympiad
-User must be able to select events and players of the olympiads also from here.
+{% from "entity_macros.html" import entity_element %}
+<div id="olympiad-page" class="olympiad-page">
+
+    <details class="stages-setup-details" open>
+        <summary class="stages-setup-summary">
+            <span class="stages-setup-summary-label">Descrizione</span>
+        </summary>
+        <div class="olympiad-page-section-body"></div>
+    </details>
+
+    <details class="stages-setup-details" open>
+        <summary class="stages-setup-summary">
+            <span class="stages-setup-summary-label">Eventi ({{ events | length }})</span>
+        </summary>
+        <div class="olympiad-page-section-body">
+            {% if not events %}
+                <div class="olympiad-page-empty">Nessun evento</div>
+            {% else %}
+                {% for event in events %}
+                    {{ entity_element(event, "events") }}
+                {% endfor %}
+            {% endif %}
+        </div>
+    </details>
+
+    <details class="stages-setup-details" open>
+        <summary class="stages-setup-summary">
+            <span class="stages-setup-summary-label">Giocatori ({{ players | length }})</span>
+        </summary>
+        <div class="olympiad-page-section-body">
+            {% if not players %}
+                <div class="olympiad-page-empty">Nessun giocatore</div>
+            {% else %}
+                {% for player in players %}
+                    {{ entity_element(player, "players") }}
+                {% endfor %}
+            {% endif %}
+        </div>
+    </details>
+
+</div>

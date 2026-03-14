@@ -45,6 +45,10 @@ def render_entity_fragment(block_name: str, **ctx) -> str:
     return _jinja2_render_block(templates.env, "entity_list.html", block_name, **ctx)
 
 
+def render_modal_fragment(block_name: str, **ctx) -> str:
+    return _jinja2_render_block(templates.env, "modals.html", block_name, **ctx)
+
+
 SCORE_KINDS = [
     {"kind": "points", "label": "Punti"},
     {"kind": "outcome", "label": "Vittoria / Sconfitta"},
@@ -210,7 +214,6 @@ def derive_event_status(current_stage_order: int, max_stage_order: int):
 def get_olympiad_from_request(request: Request) -> dict:
     result = {
         "id": int(request.headers.get("X-Olympiad-Id", "0")),
-        "version": int(request.headers.get("X-Olympiad-Version", "0")),
         "name": request.headers.get("X-Olympiad-Name", ""),
     }
     return result
@@ -269,18 +272,18 @@ def _render_operation_denied(result, olympiad_id, entities):
         extra_headers["HX-Reswap"] = "innerHTML"
 
     if result == Status.OLYMPIAD_NOT_SELECTED:
-        html_content = templates.get_template("select_olympiad_required.html").render()
+        html_content = render_modal_fragment("select_olympiad_required")
     if result == Status.OLYMPIAD_NOT_FOUND:
-        html_content = templates.get_template("olympiad_not_found.html").render()
+        html_content = render_modal_fragment("olympiad_not_found")
     elif result == Status.OLYMPIAD_RENAMED:
-        html_content = templates.get_template("olympiad_name_changed.html").render()
+        html_content = render_modal_fragment("olympiad_name_changed")
     elif result == Status.NAME_DUPLICATION:
-        html_content = templates.get_template("entity_name_duplicate.html").render(entities=entities)
+        html_content = render_modal_fragment("name_duplicate", entities=entities)
     elif result == Status.NOT_AUTHORIZED:
         extra_headers["HX-Pin-Required"] = "true"
         html_content = templates.get_template("pin_modal.html").render(olympiad_id=olympiad_id)
     elif result == Status.PREVIOUS_STAGE_INCOMPLETE:
-        html_content = templates.get_template("previous_stage_incomplete.html").render()
+        html_content = render_modal_fragment("previous_stage_incomplete")
     elif result in (
         Status.EVENT_NOT_IN_REGISTRATION,
         Status.EVENT_VERSION_OUTDATED,
@@ -289,7 +292,7 @@ def _render_operation_denied(result, olympiad_id, entities):
         Status.EVENT_IN_REGISTRATION,
         Status.PLAYER_IN_RUNNING_EVENT
     ):
-        html_content = templates.get_template("operation_failed.html").render(result=result.value)
+        html_content = render_modal_fragment("operation_failed", result=result.value)
 
     return html_content, extra_headers
 
@@ -451,7 +454,7 @@ def _get_edit_textbox(request: Request, entities: str, item_id: int, name: str):
 
 def _cancel_edit(request: Request, entities: str, item_id: int, name: str):
     hx_target = "#olympiad-badge" if entities == "olympiads" else "#main-content"
-    return HTMLResponse(render_entity_fragment("entity_element", item={"id": item_id, "name": name}, entities=entities, hx_target=hx_target))
+    return HTMLResponse(templates.env.get_template("entity_macros.html").module.entity_element({"id": item_id, "name": name}, entities))
 
 
 def _list_entities(request: Request, entities: str):
@@ -465,7 +468,7 @@ def _list_entities(request: Request, entities: str):
         result = Status.OLYMPIAD_NOT_SELECTED
 
     if result == Status.OLYMPIAD_NOT_SELECTED:
-        html_content = templates.get_template("select_olympiad_required.html").render()
+        html_content = render_modal_fragment("select_olympiad_required")
 
     if result == Status.SUCCESS:
         items = conn.execute(
@@ -512,7 +515,7 @@ def _rename_entity(request: Request, entities: str, entity_id: int, entity_curr_
     html_content, extra_headers = _render_operation_denied(result, olympiad_id, entities)
 
     if result == Status.ENTITY_NOT_FOUND:
-        html_content = templates.get_template("entity_deleted_oob.html").render()
+        html_content = render_entity_fragment("entity_deleted_oob")
     elif result == Status.ENTITY_RENAMED:
         entity = conn.execute(f"SELECT * FROM {entities} WHERE id = ?", (entity_id,)).fetchone()
         entity_data = {"id": entity_id, "name": entity["name"], "version": entity["version"]}
@@ -523,9 +526,9 @@ def _rename_entity(request: Request, entities: str, entity_id: int, entity_curr_
             (entity_new_name, entity_id)
         ).fetchone()
         item = {"id": entity_id, "name": updated_row["name"], "version": updated_row["version"]}
-        html_content = render_entity_fragment("entity_element", item=item, entities=entities, hx_target=hx_target)
+        html_content = templates.env.get_template("entity_macros.html").module.entity_element(item, entities)
 
-    html_content += _oob_badge_html(request, olympiad_id)
+    html_content = "".join([html_content, _oob_badge_html(request, olympiad_id)])
     response = HTMLResponse(html_content)
     response.headers.update(extra_headers)
 
@@ -571,7 +574,7 @@ def _delete_entity(request: Request, entities: str, entity_id: int, entity_name:
     html_content, extra_headers = _render_operation_denied(result, olympiad_id, entities)
 
     if result == Status.ENTITY_NOT_FOUND:
-        html_content = templates.get_template("entity_deleted_oob.html").render()
+        html_content = render_entity_fragment("entity_deleted_oob")
     elif result == Status.ENTITY_RENAMED:
         entity = conn.execute(f"SELECT * FROM {entities} WHERE id = ?", (entity_id,)).fetchone()
         entity_data = {"id": entity_id, "name": entity["name"], "version": entity["version"]}
