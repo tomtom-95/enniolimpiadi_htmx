@@ -166,6 +166,22 @@
     BLOCK: operation_failed
     Expects: result (string error message)
 #}
+{% block not_authorized %}
+<div id="modal" _="on closeModal from body remove me">
+    <div class="modal-underlay" _="on click trigger closeModal on body"></div>
+    <div class="modal-content" _="on click halt the event's bubbling">
+        <p>Devi prima autenticarti. Inserisci il PIN nella sezione in cima alla pagina.</p>
+        <div class="modal-actions">
+            <button _="on click trigger closeModal on body">Chiudi</button>
+        </div>
+    </div>
+</div>
+{% endblock %} {# not_authorized #}
+
+{#
+    BLOCK: operation_failed
+    Expects: result (string error message)
+#}
 {% block operation_failed %}
 <div id="modal" _="on closeModal from body remove me">
     <div class="modal-underlay" _="on click trigger closeModal on body"></div>

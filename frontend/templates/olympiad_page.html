@@ -3,6 +3,20 @@
      hx-ext="sse"
      sse-connect="/api/olympiads/{{ olympiad.id }}/page-sse?tab_id={{ tab_id }}">
 
+    <div id="olympiad-auth-section">
+        {% block olympiad_auth_section %}
+            {% if is_authorized %}
+                <button class="btn-auth" disabled>Autenticato</button>
+            {% else %}
+                <button class="btn-auth"
+                        hx-get="/api/olympiads/{{ olympiad.id }}/auth-modal"
+                        hx-target="#modal-container">
+                    Inserisci PIN
+                </button>
+            {% endif %}
+        {% endblock %}
+    </div>
+
     <span hidden
           hx-trigger="sse:event-created, sse:event-renamed, sse:event-deleted"
           hx-get="/api/olympiads/{{ olympiad.id }}/events-list"

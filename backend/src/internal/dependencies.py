@@ -293,8 +293,7 @@ def _render_operation_denied(result, olympiad_id, entities):
     elif result == Status.NAME_DUPLICATION:
         html_content = render_modal_fragment("name_duplicate", entities=entities)
     elif result == Status.NOT_AUTHORIZED:
-        extra_headers["HX-Pin-Required"] = "true"
-        html_content = templates.get_template("pin_modal.html").render(olympiad_id=olympiad_id)
+        html_content = render_modal_fragment("not_authorized")
     elif result == Status.PREVIOUS_STAGE_INCOMPLETE:
         html_content = render_modal_fragment("previous_stage_incomplete")
     elif result in (
@@ -497,6 +496,8 @@ def _list_entities(request: Request, entities: str):
 
 
 def _rename_entity(request: Request, entities: str, entity_id: int, entity_curr_name: str, entity_new_name: str):
+    # With the current sse and the fact that I am moving all in the olympiad page now "I guarantee"
+    # that when I am renaming an entity that olympiad exist and the 
     conn = request.state.conn
 
     olympiad_badge_ctx = get_olympiad_from_request(request)

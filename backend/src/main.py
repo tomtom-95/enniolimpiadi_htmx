@@ -99,10 +99,9 @@ def validate_pin(request: Request, pin: str = Form(...), olympiad_id: int = Form
         extra_headers["HX-Retarget"] = "#modal-container"
         extra_headers["HX-Reswap"] = "innerHTML"
     elif result == dep.Status.INVALID_PIN:
-        html_content = dep.templates.get_template("pin_modal.html")
-        html_content = html_content.render(olympiad_id=olympiad_id, error="PIN errato")
-        extra_headers["HX-Retarget"] = "#modal-container"
-        extra_headers["HX-Reswap"] = "innerHTML"
+        html_content = dep.templates.get_template("pin_modal.html").render(
+            olympiad_id=olympiad_id, error="PIN errato"
+        )
     else:
         conn.execute(
             """
@@ -111,8 +110,10 @@ def validate_pin(request: Request, pin: str = Form(...), olympiad_id: int = Form
             """,
             (session_id, olympiad_id)
         )
-        html_content = ""
-        extra_headers["HX-Trigger"] = "pinValidated"
+        auth_section_inner = dep.render_olympiad_fragment(
+            "olympiad_auth_section", is_authorized=True, olympiad={"id": olympiad_id}
+        )
+        html_content = f'<div id="olympiad-auth-section" hx-swap-oob="innerHTML">{auth_section_inner}</div>'
 
     response = HTMLResponse(html_content)
     response.headers.update(extra_headers)

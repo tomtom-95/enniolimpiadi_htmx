@@ -724,6 +724,34 @@ body {
     padding: 1rem;
 }
 
+#olympiad-auth-section {
+    display: flex;
+}
+
+.btn-auth {
+    flex: 1;
+    padding: 0.75rem 1rem;
+    background-color: #fde8e5;
+    color: #2d2a4a;
+    border: 2px solid #2d2a4a;
+    border-radius: 8px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    text-align: left;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.07);
+    transition: background-color 0.2s ease;
+}
+
+.btn-auth:hover:not(:disabled) {
+    background-color: #fbd0cb;
+}
+
+.btn-auth:disabled {
+    cursor: default;
+}
+
 .olympiad-page-section-body {
     display: flex;
     flex-direction: column;

@@ -195,8 +195,9 @@ def select_olympiad(request: Request, olympiad_id: int, olympiad_name: str = Que
         events = [{"id": r["id"], "name": r["name"]} for r in events]
         players = [{"id": r["id"], "name": r["name"]} for r in players]
 
+        is_authorized = dep.check_user_authorized(request, olympiad_id) is not None
         html_content = dep.templates.get_template("olympiad_page.html").render(
-            olympiad=olympiad_data, events=events, players=players, tab_id=tab_id
+            olympiad=olympiad_data, events=events, players=players, tab_id=tab_id, is_authorized=is_authorized
         )
         html_content += dep.templates.get_template("olympiad_badge.html").render(
             olympiad=olympiad_data, tab_id=tab_id, oob=True
@@ -212,6 +213,11 @@ def select_olympiad(request: Request, olympiad_id: int, olympiad_name: str = Que
         conn.rollback()
 
     return response
+
+
+@router.get("/{olympiad_id}/auth-modal")
+def get_auth_modal(request: Request, olympiad_id: int):
+    return dep.templates.TemplateResponse(request, "pin_modal.html", {"olympiad_id": olympiad_id})
 
 
 @router.get("/{olympiad_id}/edit")
