@@ -68,7 +68,7 @@ def main():
         for i in range(1, 17):
             r = client.post("/api/events", data={"name": f"Event{i}"}, headers=headers)
             r.raise_for_status()
-            eid = extract_id(r.text, r'sse-connect="/api/events/(\d+)/sse"')
+            eid = extract_id(r.text, r'sse-connect="/api/events/(\d+)/sse\?tab_id=[^"]*"')
             event_ids.append(eid)
         print(f"Created 16 events")
 

@@ -80,10 +80,11 @@ _event_subscribers: dict[int, set] = defaultdict(set)
 _olympiad_subscribers: dict[int, set] = defaultdict(set)
 
 
-def notify_event(event_id: int, event_name: str):
+def notify_event(event_id: int, event_name: str, exclude_tab_id: str = None):
     msg = f"event: {event_name}\ndata: \n\n"
-    for queue in list(_event_subscribers.get(event_id, [])):
-        queue.put_nowait(msg)
+    for tab_id, queue in list(_event_subscribers.get(event_id, [])):
+        if tab_id != exclude_tab_id:
+            queue.put_nowait(msg)
 
 
 def notify_olympiad(olympiad_id: int, event_name: str, exclude_tab_id: str = None):

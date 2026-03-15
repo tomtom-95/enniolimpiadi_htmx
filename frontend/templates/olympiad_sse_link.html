@@ -13,7 +13,43 @@
             hx-get="/api/olympiads/{{ olympiad_id }}/renamed-notice"
             hx-target="#modal-container"
             hx-swap="innerHTML"></span>
-      </div>
+
+      {#
+            What I want from the triggering of this event is to update the list of events
+            currently displayed when I am on the olympiad page
+            When I am in this page all the events of this olympiad are displayed
+            When an event is renamed the event-renamed message is written in all the queues for that event_id:
+                  before:
+                        _event_subscribers = {
+                              event_id: [(tab_id, queue1(...)), (tab_id_2, queue2(...))]
+                        }
+                  after:
+                        _event_subscribers = {
+                              event_id: [(tab_id, queue1("event-renamed")), (tab_id_2, queue2("event_renamed"))]
+                        }
+
+            these events are then sent to the pages that are listening (then ones that created the queues in the first place)
+
+            If I now look at olympiad_sse_link, I see that a call is made to create a queue of this kind
+                  _olympiad_subscribers = {
+                        olympiad_id: [(tab_id_1, queue1(...))]
+                  }
+
+            so if I want the renamed-notice message to do something when we are looking at one olympiad page
+            I must write in this queue. The problem is, olympiad_sse_link.html is not bound to the olympiad page.
+            It might be that the user click on OlympiadA, then move around, for example in the page of EventA.
+            So what I really want is to have a new sse connection with a new dict (let's say _olympiad_page_subscribers)
+            on the olympiad page that open/closes only when I open/close an olympiad_page.html
+            I want the event-renamed to be written in this new dict (new queues) and when event-renamed arrive instead of
+            renamed-notice endpoint an update of the olympiad-page-section body must happen (we could be more fine grained
+            with the update but it is not important). The idea so is having this on olympiad_page.html
+            <span hidden
+                  hx-trigger="sse:event-renamed"
+                  hx-get="/api/events"
+                  hx-target="#an-id-to-identify-the-list-of-events-in-the-olympiad-page"
+                  hx-swap="innerHTML"></span>
+            </div>
+      #}
 {% else %}
       <div id="olympiad-sse-link" hx-swap-oob="true"></div>
 {% endif %}

@@ -902,6 +902,7 @@ def create_event(request: Request, name: str = Form(...)):
             event_name=event["name"],
             event_version=event["version"],
             olympiad_id=olympiad_id,
+            tab_id=request.headers.get("X-Tab-Id", ""),
             **event_ctx,
         )
 
@@ -981,6 +982,7 @@ def select_event(request: Request, event_id: int, event_name: str = Query(None, 
             event_version=event["version"],
             olympiad_id=olympiad_id,
             is_admin=dep.check_user_authorized(request, olympiad_id),
+            tab_id=request.headers.get("X-Tab-Id", ""),
             **event_ctx
         )
 
@@ -1012,15 +1014,15 @@ def start_event(request: Request, event_id: int):
             stage_kind = dep.STAGE_KIND_MAP[(first_stage["advancement_mechanism"], first_stage["match_size"])]["kind"]
             if stage_kind == "groups":
                 groups = conn.execute("SELECT id FROM groups WHERE event_stage_id = ?", (stage_id,)).fetchall()
-                events.generate_groups_stage(conn, stage_id, len(groups))
+                generate_groups_stage(conn, stage_id, len(groups))
             elif stage_kind == "individual_score":
                 groups = conn.execute("SELECT id FROM groups WHERE event_stage_id = ?", (stage_id,)).fetchall()
-                events.generate_individual_score_stage(conn, stage_id, max(1, len(groups)))
+                generate_individual_score_stage(conn, stage_id, max(1, len(groups)))
             elif stage_kind == "single_elimination":
-                events.generate_single_elimination_stage(conn, stage_id)
-            events.rebuild_subsequent_stages(conn, stage_id)
+                generate_single_elimination_stage(conn, stage_id)
+            rebuild_subsequent_stages(conn, stage_id)
         conn.commit()
-        dep.notify_event(event_id, "status-update")
+        dep.notify_event(event_id, "status-update", exclude_tab_id=request.headers.get("X-Tab-Id", ""))
     else:
         conn.rollback()
 
@@ -1039,7 +1041,7 @@ def finish_event(request: Request, event_id: int):
 
     if result == dep.Status.SUCCESS:
         conn.commit()
-        dep.notify_event(event_id, "status-update")
+        dep.notify_event(event_id, "status-update", exclude_tab_id=request.headers.get("X-Tab-Id", ""))
     else:
         conn.rollback()
 
@@ -1056,7 +1058,7 @@ def back_to_registration(request: Request, event_id: int):
 
     if result == dep.Status.SUCCESS:
         conn.commit()
-        dep.notify_event(event_id, "status-update")
+        dep.notify_event(event_id, "status-update", exclude_tab_id=request.headers.get("X-Tab-Id", ""))
     else:
         conn.rollback()
 
@@ -1075,7 +1077,7 @@ def back_to_running(request: Request, event_id: int):
 
     if result == dep.Status.SUCCESS:
         conn.commit()
-        dep.notify_event(event_id, "status-update")
+        dep.notify_event(event_id, "status-update", exclude_tab_id=request.headers.get("X-Tab-Id", ""))
     else:
         conn.rollback()
 
@@ -2002,9 +2004,10 @@ def get_event_olympiad_renamed_notice(request: Request, event_id: int):
 
 
 @router.get("/{event_id}/sse")
-async def event_sse(request: Request, event_id: int):
+async def event_sse(request: Request, event_id: int, tab_id: str = Query("")):
     queue: asyncio.Queue = asyncio.Queue()
-    dep._event_subscribers[event_id].add(queue)
+    entry = (tab_id, queue)
+    dep._event_subscribers[event_id].add(entry)
 
     async def generate():
         try:
@@ -2015,7 +2018,7 @@ async def event_sse(request: Request, event_id: int):
                 except asyncio.TimeoutError:
                     yield ": keepalive\n\n"
         finally:
-            dep._event_subscribers[event_id].discard(queue)
+            dep._event_subscribers[event_id].discard(entry)
 
     media_type = "text/event-stream"
     headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
@@ -2127,6 +2130,7 @@ def _set_event_stage_order(request: Request, event_id: int, new_stage_order: int
             event_version=event["version"],
             olympiad_id=olympiad_id,
             is_admin=dep.check_user_authorized(request, olympiad_id),
+            tab_id=request.headers.get("X-Tab-Id", ""),
             **event_ctx
         )
 

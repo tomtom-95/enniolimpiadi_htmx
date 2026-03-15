@@ -12,7 +12,7 @@
     <div id="event-page"
          class="event-page"
          hx-ext="sse"
-         sse-connect="/api/events/{{ event_id }}/sse"
+         sse-connect="/api/events/{{ event_id }}/sse?tab_id={{ tab_id }}"
          hx-trigger="sse:status-update"
          hx-get="/api/events/{{ event_id }}"
          hx-target="#event-page"
