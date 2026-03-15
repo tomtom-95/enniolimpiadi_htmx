@@ -53,6 +53,10 @@ def render_modal_fragment(block_name: str, **ctx) -> str:
     return _jinja2_render_block(templates.env, "modals.html", block_name, **ctx)
 
 
+def render_player_fragment(block_name: str, **ctx) -> str:
+    return _jinja2_render_block(templates.env, "player_page.html", block_name, **ctx)
+
+
 SCORE_KINDS = [
     {"kind": "points", "label": "Punti"},
     {"kind": "outcome", "label": "Vittoria / Sconfitta"},
@@ -475,20 +479,12 @@ def _list_entities(request: Request, entities: str):
     olympiad_badge_ctx = get_olympiad_from_request(request)
     olympiad_id = olympiad_badge_ctx["id"]
 
-    result = Status.SUCCESS
-    if olympiad_id == 0:
-        result = Status.OLYMPIAD_NOT_SELECTED
-
-    if result == Status.OLYMPIAD_NOT_SELECTED:
-        html_content = render_modal_fragment("select_olympiad_required")
-
-    if result == Status.SUCCESS:
-        items = conn.execute(
-            f"SELECT e.id, e.name, e.version FROM {entities} e WHERE e.olympiad_id = ?",
-            (olympiad_id,)
-        ).fetchall()
-        placeholder = entity_list_form_placeholder[entities]
-        html_content = render_entity_fragment("entity_list", entities=entities, placeholder=placeholder, items=items)
+    items = conn.execute(
+        f"SELECT e.id, e.name, e.version FROM {entities} e WHERE e.olympiad_id = ?",
+        (olympiad_id,)
+    ).fetchall()
+    placeholder = entity_list_form_placeholder[entities]
+    html_content = render_entity_fragment("entity_list", entities=entities, placeholder=placeholder, items=items)
 
     response = HTMLResponse(html_content)
 
@@ -496,29 +492,14 @@ def _list_entities(request: Request, entities: str):
 
 
 def _rename_entity(request: Request, entities: str, entity_id: int, entity_curr_name: str, entity_new_name: str):
-    # With the current sse and the fact that I am moving all in the olympiad page now "I guarantee"
-    # that when I am renaming an entity that olympiad exist and the 
     conn = request.state.conn
 
     olympiad_badge_ctx = get_olympiad_from_request(request)
     olympiad_id = olympiad_badge_ctx["id"]
-    olympiad_name = olympiad_badge_ctx["name"]
-
-    hx_target = f"#{request.headers.get('HX-Target')}"
-
-    assert olympiad_id != 0
 
     conn.execute("BEGIN IMMEDIATE")
 
     result = Status.SUCCESS
-    if not check_olympiad_exist(request, olympiad_id):
-        result = Status.OLYMPIAD_NOT_FOUND
-    if result == Status.SUCCESS and not check_olympiad_name(request, olympiad_id, olympiad_name):
-        result = Status.OLYMPIAD_RENAMED
-    if result == Status.SUCCESS and not check_entity_exist(request, entities, entity_id):
-        result = Status.ENTITY_NOT_FOUND
-    if result == Status.SUCCESS and not check_entity_name(request, entities, entity_id, entity_curr_name):
-        result = Status.ENTITY_RENAMED
     if result == Status.SUCCESS and check_entity_name_duplication(request, olympiad_id, entities, 0, entity_new_name):
         result = Status.NAME_DUPLICATION
     if result == Status.SUCCESS and not check_user_authorized(request, olympiad_id):
@@ -528,13 +509,7 @@ def _rename_entity(request: Request, entities: str, entity_id: int, entity_curr_
 
     html_content, extra_headers = _render_operation_denied(result, olympiad_id, entities)
 
-    if result == Status.ENTITY_NOT_FOUND:
-        html_content = render_entity_fragment("entity_deleted_oob")
-    elif result == Status.ENTITY_RENAMED:
-        entity = conn.execute(f"SELECT * FROM {entities} WHERE id = ?", (entity_id,)).fetchone()
-        entity_data = {"id": entity_id, "name": entity["name"], "version": entity["version"]}
-        html_content = render_entity_fragment("entity_renamed_oob", entities=entities, item=entity_data, hx_target=hx_target)
-    elif result == Status.SUCCESS:
+    if result == Status.SUCCESS:
         updated_row = conn.execute(
             f"UPDATE {entities} SET name = ?, version = version + 1 WHERE id = ? RETURNING id, name, version",
             (entity_new_name, entity_id)
@@ -542,7 +517,6 @@ def _rename_entity(request: Request, entities: str, entity_id: int, entity_curr_
         item = {"id": entity_id, "name": updated_row["name"], "version": updated_row["version"]}
         html_content = templates.env.get_template("entity_macros.html").module.entity_element(item, entities)
 
-    html_content = "".join([html_content, _oob_badge_html(request, olympiad_id)])
     response = HTMLResponse(html_content)
     response.headers.update(extra_headers)
 
@@ -565,23 +539,9 @@ def _delete_entity(request: Request, entities: str, entity_id: int, entity_name:
 
     olympiad_badge_ctx = get_olympiad_from_request(request)
     olympiad_id = olympiad_badge_ctx["id"]
-    olympiad_name = olympiad_badge_ctx["name"]
-
-    hx_target = f"#{request.headers.get('HX-Target')}"
-
-    assert olympiad_id != 0
 
     conn.execute("BEGIN IMMEDIATE")
 
-    result = Status.SUCCESS
-    if not check_olympiad_exist(request, olympiad_id):
-        result = Status.OLYMPIAD_NOT_FOUND
-    if result == Status.SUCCESS and not check_olympiad_name(request, olympiad_id, olympiad_name):
-        result = Status.OLYMPIAD_RENAMED
-    if result == Status.SUCCESS and not check_entity_exist(request, entities, entity_id):
-        result = Status.ENTITY_NOT_FOUND
-    if result == Status.SUCCESS and not check_entity_name(request, entities, entity_id, entity_name):
-        result = Status.ENTITY_RENAMED
     if result == Status.SUCCESS and not check_user_authorized(request, olympiad_id):
         result = Status.NOT_AUTHORIZED
     if result == Status.SUCCESS and entities == "players" and check_player_in_running_event(request, entity_id):
@@ -589,13 +549,7 @@ def _delete_entity(request: Request, entities: str, entity_id: int, entity_name:
 
     html_content, extra_headers = _render_operation_denied(result, olympiad_id, entities)
 
-    if result == Status.ENTITY_NOT_FOUND:
-        html_content = render_entity_fragment("entity_deleted_oob")
-    elif result == Status.ENTITY_RENAMED:
-        entity = conn.execute(f"SELECT * FROM {entities} WHERE id = ?", (entity_id,)).fetchone()
-        entity_data = {"id": entity_id, "name": entity["name"], "version": entity["version"]}
-        html_content = render_entity_fragment("entity_renamed_oob", entities=entities, item=entity_data, hx_target=hx_target)
-    elif result == Status.SUCCESS:
+    if result == Status.SUCCESS:
         conn.execute(f"DELETE FROM {entities} WHERE id = ?", (entity_id,))
         html_content = templates.get_template("entity_delete.html").render()
 

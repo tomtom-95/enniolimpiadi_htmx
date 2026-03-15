@@ -59,7 +59,6 @@ def create_team(request: Request, name: str = Form(...)):
         extra_headers["HX-Retarget"] = "#entity-list"
         extra_headers["HX-Reswap"] = "afterbegin"
 
-    html_content += dep._oob_badge_html(request, olympiad_id)
     response = HTMLResponse(html_content)
     response.headers.update(extra_headers)
 

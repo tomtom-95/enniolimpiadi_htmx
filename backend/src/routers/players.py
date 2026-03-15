@@ -27,15 +27,10 @@ def create_player(request: Request, name: str = Form(...)):
 
     olympiad_badge_ctx = dep.get_olympiad_from_request(request)
     olympiad_id = olympiad_badge_ctx["id"]
-    olympiad_name = olympiad_badge_ctx["name"]
 
     conn.execute("BEGIN IMMEDIATE")
 
     result = dep.Status.SUCCESS
-    if not dep.check_olympiad_exist(request, olympiad_id):
-        result = dep.Status.OLYMPIAD_NOT_FOUND
-    if result == dep.Status.SUCCESS and not dep.check_olympiad_name(request, olympiad_id, olympiad_name):
-        result = dep.Status.OLYMPIAD_RENAMED
     if result == dep.Status.SUCCESS and dep.check_entity_name_duplication(request, olympiad_id, "players", 0, name):
         result = dep.Status.NAME_DUPLICATION
     if result == dep.Status.SUCCESS and not dep.check_user_authorized(request, olympiad_id):
@@ -59,7 +54,6 @@ def create_player(request: Request, name: str = Form(...)):
         extra_headers["HX-Retarget"] = "#entity-list"
         extra_headers["HX-Reswap"] = "afterbegin"
 
-    html_content = "".join([html_content, dep._oob_badge_html(request, olympiad_id)])
     response = HTMLResponse(html_content)
     response.headers.update(extra_headers)
 
@@ -71,6 +65,29 @@ def create_player(request: Request, name: str = Form(...)):
         conn.rollback()
 
     return response
+
+
+@router.get("/{player_id}")
+def select_player(request: Request, player_id: int, player_name: str = Query(None, alias="name")):
+    conn = request.state.conn
+
+    olympiad_badge_ctx = dep.get_olympiad_from_request(request)
+    olympiad_id = olympiad_badge_ctx["id"]
+
+    player = conn.execute(
+        "SELECT id, name FROM players WHERE id = ?",
+        (player_id,)
+    ).fetchone()
+
+    html_content = dep.render_player_fragment(
+        "player_page",
+        player_id=player["id"],
+        player_name=player["name"],
+        olympiad_id=olympiad_id,
+        tab_id=request.headers.get("X-Tab-Id", ""),
+    )
+
+    return HTMLResponse(html_content)
 
 
 @router.put("/{entity_id}")

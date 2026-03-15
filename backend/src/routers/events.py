@@ -924,19 +924,19 @@ def get_edit_textbox_events(request: Request, event_id: int, name: str = Query(.
     return dep.templates.TemplateResponse(request, "edit_entity.html", ctx)
 
 
-@router.get("/{item_id}/cancel-edit")
-def cancel_edit_events(request: Request, item_id: int, name: str = Query(...)):
-    return dep._cancel_edit(request, "events", item_id, name)
+@router.get("/{event_id}/cancel-edit")
+def cancel_edit_events(request: Request, event_id: int, name: str = Query(...)):
+    return dep._cancel_edit(request, "events", event_id, name)
 
 
-@router.put("/{entity_id}")
-def rename_events(request: Request, entity_id: int, curr_name: str = Form(...), new_name: str = Form(...)):
-    return dep._rename_entity(request, "events", entity_id, curr_name, new_name)
+@router.put("/{event_id}")
+def rename_events(request: Request, event_id: int, curr_name: str = Form(...), new_name: str = Form(...)):
+    return dep._rename_entity(request, "events", event_id, curr_name, new_name)
 
 
-@router.delete("/{entity_id}")
-def delete_events(request: Request, entity_id: int, entity_name: str = Query(..., alias="name")):
-    return dep._delete_entity(request, "events", entity_id, entity_name)
+@router.delete("/{event_id}")
+def delete_events(request: Request, event_id: int, entity_name: str = Query(..., alias="name")):
+    return dep._delete_entity(request, "events", event_id, entity_name)
 
 
 # ---------------------------------------------------------------------------
@@ -950,46 +950,25 @@ def select_event(request: Request, event_id: int, event_name: str = Query(None, 
     olympiad_badge_ctx = dep.get_olympiad_from_request(request)
     olympiad_id = olympiad_badge_ctx["id"]
 
-    result = dep.Status.SUCCESS
-    if result == dep.Status.SUCCESS and not dep.check_entity_exist(request, "events", event_id):
-        result = dep.Status.ENTITY_NOT_FOUND
-    if result == dep.Status.SUCCESS and not dep.check_entity_name(request, "events", event_id, event_name):
-        result = dep.Status.ENTITY_RENAMED
+    event = conn.execute(
+        "SELECT id, name, version, current_stage_order, score_kind FROM events WHERE id = ?",
+        (event_id,)
+    ).fetchone()
 
-    html_content, extra_headers = dep._render_operation_denied(result, olympiad_id, "events")
+    event_ctx = _get_event_ctx(conn, event_id, olympiad_id, event["score_kind"], event["current_stage_order"])
 
-    if result == dep.Status.ENTITY_NOT_FOUND:
-        html_content = dep.render_entity_fragment("entity_deleted_oob")
-        extra_headers["HX-Retarget"] = f"#events-{event_id}"
-        extra_headers["HX-Reswap"] = "outerHTML"
-    elif result == dep.Status.ENTITY_RENAMED:
-        event = conn.execute("SELECT * FROM events WHERE id = ?", (event_id,)).fetchone()
-        event_data = {"id": event_id, "name": event["name"], "version": event["version"]}
-        html_content = dep.render_entity_fragment("entity_renamed_oob", entities="events", item=event_data)
-        extra_headers["HX-Retarget"] = f"#events-{event_id}"
-        extra_headers["HX-Reswap"] = "outerHTML"
-    elif result == dep.Status.SUCCESS:
-        event = conn.execute(
-            "SELECT id, name, version, current_stage_order, score_kind FROM events WHERE id = ?",
-            (event_id,)
-        ).fetchone()
+    html_content = dep.render_event_fragment(
+        "event_page",
+        event_id=event["id"],
+        event_name=event["name"],
+        event_version=event["version"],
+        olympiad_id=olympiad_id,
+        is_admin=dep.check_user_authorized(request, olympiad_id),
+        tab_id=request.headers.get("X-Tab-Id", ""),
+        **event_ctx
+    )
 
-        event_ctx = _get_event_ctx(conn, event_id, olympiad_id, event["score_kind"], event["current_stage_order"])
-
-        html_content = dep.render_event_fragment(
-            "event_page",
-            event_id=event["id"],
-            event_name=event["name"],
-            event_version=event["version"],
-            olympiad_id=olympiad_id,
-            is_admin=dep.check_user_authorized(request, olympiad_id),
-            tab_id=request.headers.get("X-Tab-Id", ""),
-            **event_ctx
-        )
-
-    html_content += dep._oob_badge_html(request, olympiad_id)
     response = HTMLResponse(html_content)
-    response.headers.update(extra_headers)
 
     return response
 
@@ -1005,6 +984,7 @@ def start_event(request: Request, event_id: int):
     conn.execute("BEGIN IMMEDIATE")
 
     result, response = _set_event_stage_order(request, event_id, new_stage_order=1)
+
     if result == dep.Status.SUCCESS:
         first_stage = conn.execute(
             "SELECT id, advancement_mechanism, match_size FROM event_stages WHERE event_id = ? AND stage_order = 1",
@@ -1022,6 +1002,8 @@ def start_event(request: Request, event_id: int):
             elif stage_kind == "single_elimination":
                 generate_single_elimination_stage(conn, stage_id)
             rebuild_subsequent_stages(conn, stage_id)
+    
+    if result == dep.Status.SUCCESS:
         conn.commit()
         dep.notify_event(event_id, "status-update", exclude_tab_id=request.headers.get("X-Tab-Id", ""))
     else:
@@ -1248,7 +1230,7 @@ def add_event_stage(request: Request, event_id: int):
     conn.execute("BEGIN IMMEDIATE")
 
     result = dep.Status.SUCCESS
-    if result == dep.Status.SUCCESS and not dep.check_user_authorized(request, olympiad_id):
+    if not dep.check_user_authorized(request, olympiad_id):
         result = dep.Status.NOT_AUTHORIZED
 
     html_content, extra_headers = dep._render_operation_denied(result, olympiad_id, "events")
@@ -1538,7 +1520,6 @@ def set_stage_num_groups(request: Request, event_id: int, stage_id: int, num_gro
             conn.execute("INSERT INTO groups (event_stage_id) VALUES (?)", (stage_id,))
         html_content = _render_stages_section_html(conn, event_id)
 
-    html_content += dep._oob_badge_html(request, olympiad_id)
     response = HTMLResponse(html_content)
     response.headers.update(extra_headers)
 
@@ -1573,7 +1554,6 @@ def set_stage_advance_count(request: Request, event_id: int, stage_id: int, adva
         )
         html_content = _render_stages_section_html(conn, event_id)
 
-    html_content += dep._oob_badge_html(request, olympiad_id)
     response = HTMLResponse(html_content)
     response.headers.update(extra_headers)
 
