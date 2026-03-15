@@ -983,7 +983,14 @@ def start_event(request: Request, event_id: int):
 
     conn.execute("BEGIN IMMEDIATE")
 
-    result, response = _set_event_stage_order(request, event_id, new_stage_order=1)
+    olympiad_badge_ctx = dep.get_olympiad_from_request(request)
+    olympiad_id = olympiad_badge_ctx["id"]
+
+    result = dep.Status.SUCCESS
+    if not dep.check_user_authorized(request, olympiad_id):
+        result = dep.Status.NOT_AUTHORIZED
+
+    html_content, _ = dep._render_operation_denied(result, olympiad_id, "events")
 
     if result == dep.Status.SUCCESS:
         first_stage = conn.execute(
@@ -1002,7 +1009,9 @@ def start_event(request: Request, event_id: int):
             elif stage_kind == "single_elimination":
                 generate_single_elimination_stage(conn, stage_id)
             rebuild_subsequent_stages(conn, stage_id)
-    
+
+    result, response = _set_event_stage_order(request, event_id, new_stage_order=1)
+
     if result == dep.Status.SUCCESS:
         conn.commit()
         dep.notify_event(event_id, "status-update", exclude_tab_id=request.headers.get("X-Tab-Id", ""))
