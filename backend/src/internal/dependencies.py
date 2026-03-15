@@ -45,6 +45,10 @@ def render_entity_fragment(block_name: str, **ctx) -> str:
     return _jinja2_render_block(templates.env, "entity_list.html", block_name, **ctx)
 
 
+def render_olympiad_fragment(block_name: str, **ctx) -> str:
+    return _jinja2_render_block(templates.env, "olympiad_page.html", block_name, **ctx)
+
+
 def render_modal_fragment(block_name: str, **ctx) -> str:
     return _jinja2_render_block(templates.env, "modals.html", block_name, **ctx)
 
@@ -78,11 +82,19 @@ sentinel_olympiad_badge = {"id": 0, "name": "Olympiad badge", "version": 0}
 
 _event_subscribers: dict[int, set] = defaultdict(set)
 _olympiad_subscribers: dict[int, set] = defaultdict(set)
+_olympiad_page_subscribers: dict[int, set] = defaultdict(set)
 
 
 def notify_event(event_id: int, event_name: str, exclude_tab_id: str = None):
     msg = f"event: {event_name}\ndata: \n\n"
     for tab_id, queue in list(_event_subscribers.get(event_id, [])):
+        if tab_id != exclude_tab_id:
+            queue.put_nowait(msg)
+
+
+def notify_olympiad_page(olympiad_id: int, event_name: str, exclude_tab_id: str = None):
+    msg = f"event: {event_name}\ndata: \n\n"
+    for tab_id, queue in list(_olympiad_page_subscribers.get(olympiad_id, [])):
         if tab_id != exclude_tab_id:
             queue.put_nowait(msg)
 
@@ -537,8 +549,10 @@ def _rename_entity(request: Request, entities: str, entity_id: int, entity_curr_
         conn.commit()
         if entities == "events":
             notify_event(entity_id, "event-renamed")
+            notify_olympiad_page(olympiad_id, "event-renamed", exclude_tab_id=request.headers.get("X-Tab-Id", ""))
         elif entities == "players":
             notify_olympiad_events(conn, olympiad_id, "enrollment-update")
+            notify_olympiad_page(olympiad_id, "player-renamed", exclude_tab_id=request.headers.get("X-Tab-Id", ""))
     else:
         conn.rollback()
 
@@ -593,8 +607,10 @@ def _delete_entity(request: Request, entities: str, entity_id: int, entity_name:
         if entities == "events":
             notify_event(entity_id, "event-deleted")
             _event_subscribers.pop(entity_id, None)
+            notify_olympiad_page(olympiad_id, "event-deleted", exclude_tab_id=request.headers.get("X-Tab-Id", ""))
         elif entities == "players":
             notify_olympiad_events(conn, olympiad_id, "enrollment-update")
+            notify_olympiad_page(olympiad_id, "player-deleted", exclude_tab_id=request.headers.get("X-Tab-Id", ""))
     else:
         conn.rollback()
 

@@ -1,5 +1,19 @@
-{% from "entity_macros.html" import entity_element %}
-<div id="olympiad-page" class="olympiad-page">
+<div id="olympiad-page"
+     class="olympiad-page"
+     hx-ext="sse"
+     sse-connect="/api/olympiads/{{ olympiad.id }}/page-sse?tab_id={{ tab_id }}">
+
+    <span hidden
+          hx-trigger="sse:event-created, sse:event-renamed, sse:event-deleted"
+          hx-get="/api/olympiads/{{ olympiad.id }}/events-list"
+          hx-target="#olympiad-events-list"
+          hx-swap="innerHTML"></span>
+
+    <span hidden
+          hx-trigger="sse:player-created, sse:player-renamed, sse:player-deleted"
+          hx-get="/api/olympiads/{{ olympiad.id }}/players-list"
+          hx-target="#olympiad-players-list"
+          hx-swap="innerHTML"></span>
 
     <details class="stages-setup-details" open>
         <summary class="stages-setup-summary">
@@ -12,14 +26,17 @@
         <summary class="stages-setup-summary">
             <span class="stages-setup-summary-label">Eventi ({{ events | length }})</span>
         </summary>
-        <div class="olympiad-page-section-body">
-            {% if not events %}
-                <div class="olympiad-page-empty">Nessun evento</div>
-            {% else %}
-                {% for event in events %}
-                    {{ entity_element(event, "events") }}
-                {% endfor %}
-            {% endif %}
+        <div id="olympiad-events-list" class="olympiad-page-section-body">
+            {% block olympiad_events_list %}
+                {% from "entity_macros.html" import entity_element %}
+                {% if not events %}
+                    <div class="olympiad-page-empty">Nessun evento</div>
+                {% else %}
+                    {% for event in events %}
+                        {{ entity_element(event, "events") }}
+                    {% endfor %}
+                {% endif %}
+            {% endblock %}
         </div>
     </details>
 
@@ -27,14 +44,17 @@
         <summary class="stages-setup-summary">
             <span class="stages-setup-summary-label">Giocatori ({{ players | length }})</span>
         </summary>
-        <div class="olympiad-page-section-body">
-            {% if not players %}
-                <div class="olympiad-page-empty">Nessun giocatore</div>
-            {% else %}
-                {% for player in players %}
-                    {{ entity_element(player, "players") }}
-                {% endfor %}
-            {% endif %}
+        <div id="olympiad-players-list" class="olympiad-page-section-body">
+            {% block olympiad_players_list %}
+                {% from "entity_macros.html" import entity_element %}
+                {% if not players %}
+                    <div class="olympiad-page-empty">Nessun giocatore</div>
+                {% else %}
+                    {% for player in players %}
+                        {{ entity_element(player, "players") }}
+                    {% endfor %}
+                {% endif %}
+            {% endblock %}
         </div>
     </details>
 

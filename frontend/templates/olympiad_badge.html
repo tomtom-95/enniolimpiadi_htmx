@@ -3,6 +3,9 @@
      data-version="{{ olympiad.version }}"
      data-name="{{ olympiad.name }}"
      data-tab-id="{{ tab_id }}"
+     hx-get="/api/olympiads/{{ olympiad.id }}?name={{ olympiad.name }}"
+     hx-target="#main-content"
+     hx-swap="innerHTML"
      {% if oob %}hx-swap-oob="true"{% endif %}>
     <span class="olympiad-name">{{ olympiad.name }}</span>
 </div>

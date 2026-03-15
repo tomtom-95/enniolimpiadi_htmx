@@ -30,6 +30,52 @@ async def olympiad_sse(request: Request, olympiad_id: int, tab_id: str = Query("
     return StreamingResponse(generate(), media_type=media_type, headers=headers)
 
 
+@router.get("/{olympiad_id}/page-sse")
+async def olympiad_page_sse(request: Request, olympiad_id: int, tab_id: str = Query("")):
+    queue: asyncio.Queue = asyncio.Queue()
+    entry = (tab_id, queue)
+    dep._olympiad_page_subscribers[olympiad_id].add(entry)
+
+    async def generate():
+        try:
+            while True:
+                try:
+                    data = await asyncio.wait_for(queue.get(), timeout=25.0)
+                    yield data
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+        finally:
+            dep._olympiad_page_subscribers[olympiad_id].discard(entry)
+
+    media_type = "text/event-stream"
+    headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    return StreamingResponse(generate(), media_type=media_type, headers=headers)
+
+
+@router.get("/{olympiad_id}/events-list")
+def get_olympiad_events_list(request: Request, olympiad_id: int):
+    conn = request.state.conn
+    events = conn.execute(
+        "SELECT id, name FROM events WHERE olympiad_id = ? ORDER BY name",
+        (olympiad_id,)
+    ).fetchall()
+    events = [{"id": r["id"], "name": r["name"]} for r in events]
+    html_content = dep.render_olympiad_fragment("olympiad_events_list", events=events)
+    return HTMLResponse(html_content)
+
+
+@router.get("/{olympiad_id}/players-list")
+def get_olympiad_players_list(request: Request, olympiad_id: int):
+    conn = request.state.conn
+    players = conn.execute(
+        "SELECT id, name FROM players WHERE olympiad_id = ? ORDER BY name",
+        (olympiad_id,)
+    ).fetchall()
+    players = [{"id": r["id"], "name": r["name"]} for r in players]
+    html_content = dep.render_olympiad_fragment("olympiad_players_list", players=players)
+    return HTMLResponse(html_content)
+
+
 @router.get("")
 def list_olympiads(request: Request):
     conn = request.state.conn
@@ -150,7 +196,7 @@ def select_olympiad(request: Request, olympiad_id: int, olympiad_name: str = Que
         players = [{"id": r["id"], "name": r["name"]} for r in players]
 
         html_content = dep.templates.get_template("olympiad_page.html").render(
-            olympiad=olympiad_data, events=events, players=players
+            olympiad=olympiad_data, events=events, players=players, tab_id=tab_id
         )
         html_content += dep.templates.get_template("olympiad_badge.html").render(
             olympiad=olympiad_data, tab_id=tab_id, oob=True

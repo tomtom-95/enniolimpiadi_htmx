@@ -911,6 +911,7 @@ def create_event(request: Request, name: str = Form(...)):
 
     if result == dep.Status.SUCCESS:
         conn.commit()
+        dep.notify_olympiad_page(olympiad_id, "event-created", exclude_tab_id=request.headers.get("X-Tab-Id", ""))
     else:
         conn.rollback()
 

@@ -66,6 +66,7 @@ def create_player(request: Request, name: str = Form(...)):
     if result == dep.Status.SUCCESS:
         conn.commit()
         dep.notify_olympiad_events(conn, olympiad_id, "enrollment-update")
+        dep.notify_olympiad_page(olympiad_id, "player-created", exclude_tab_id=request.headers.get("X-Tab-Id", ""))
     else:
         conn.rollback()
 
