@@ -27,6 +27,13 @@
             <span class="stages-setup-summary-label">Eventi ({{ events | length }})</span>
         </summary>
         <div id="olympiad-events-list" class="olympiad-page-section-body">
+            <form class="entity-form"
+                hx-post="/api/events"
+                hx-target="#main-content"
+                autocomplete="off">
+                <input type="text" name="name" placeholder="Nuovo evento" required>
+                <button type="submit">+</button>
+            </form>
             {% block olympiad_events_list %}
                 {% from "entity_macros.html" import entity_element %}
                 {% if not events %}
@@ -45,6 +52,13 @@
             <span class="stages-setup-summary-label">Giocatori ({{ players | length }})</span>
         </summary>
         <div id="olympiad-players-list" class="olympiad-page-section-body">
+            <form class="entity-form"
+                hx-post="/api/players"
+                hx-target="#main-content"
+                autocomplete="off">
+                <input type="text" name="name" placeholder="Nuovo giocatore" required>
+                <button type="submit">+</button>
+            </form>
             {% block olympiad_players_list %}
                 {% from "entity_macros.html" import entity_element %}
                 {% if not players %}
