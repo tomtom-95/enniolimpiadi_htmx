@@ -288,13 +288,24 @@
                 <div class="event-finished-page">
                     <div class="event-finished-icon">🏆</div>
                     <h3 class="event-finished-title">Evento concluso</h3>
-                    <p class="event-finished-subtitle">Le statistiche del torneo saranno disponibili qui.</p>
-                    <div class="event-finished-placeholder">
-                        <div class="event-finished-placeholder-row"></div>
-                        <div class="event-finished-placeholder-row short"></div>
-                        <div class="event-finished-placeholder-row"></div>
-                        <div class="event-finished-placeholder-row short"></div>
-                    </div>
+                    {% if podium %}
+                        <div class="event-podium">
+                            <div class="podium-place podium-first">
+                                <span class="podium-medal">🥇</span>
+                                <span class="podium-name">{{ podium.first }}</span>
+                            </div>
+                            <div class="podium-place podium-second">
+                                <span class="podium-medal">🥈</span>
+                                <span class="podium-name">{{ podium.second }}</span>
+                            </div>
+                            {% if podium.third %}
+                                <div class="podium-place podium-third">
+                                    <span class="podium-medal">🥉</span>
+                                    <span class="podium-name">{{ podium.third }}</span>
+                                </div>
+                            {% endif %}
+                        </div>
+                    {% endif %}
                 </div>
 
             {% else %} {# started #}

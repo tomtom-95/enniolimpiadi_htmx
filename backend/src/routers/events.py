@@ -1093,19 +1093,43 @@ def start_event(request: Request, event_id: int):
 def finish_event(request: Request, event_id: int):
     conn = request.state.conn
 
+    olympiad_badge_ctx = dep.get_olympiad_from_request(request)
+    olympiad_id = olympiad_badge_ctx["id"]
+
     max_stage_order = dep.query_get_event_max_stage_order(conn, event_id)
 
     conn.execute("BEGIN IMMEDIATE")
 
-    # When the event is finished I want to show statistics about the tournament
-    # First of all: 1st, 2nd and 3rd place
-    # I do not need to go in _set_event_stage_order
-    # the only thing I really need from that function is updating in the db teh stage_order to max_stage_order + 1
-    # but then is loaded with other meaning that I do not like
-    # the only thing I really need is to render the event_page.html with ctx["event_status"] = "finished"
-    # so that the right block of the @event_page is rendered
+    result = dep.Status.SUCCESS
+    if not dep.check_user_authorized(request, olympiad_id):
+        result = dep.Status.NOT_AUTHORIZED
 
-    result, response = _set_event_stage_order(request, event_id, new_stage_order=max_stage_order + 1)
+    html_content, extra_headers = dep._render_operation_denied(result, olympiad_id, "events")
+
+    if result == dep.Status.SUCCESS:
+        conn.execute(
+            "UPDATE events SET current_stage_order = ? WHERE id = ?",
+            (max_stage_order + 1, event_id)
+        )
+        event = conn.execute(
+            "SELECT id, name, version FROM events WHERE id = ?",
+            (event_id,)
+        ).fetchone()
+        podium = _get_podium(conn, event_id)
+        html_content = dep.render_event_fragment(
+            "event_page",
+            event_id=event["id"],
+            event_name=event["name"],
+            event_version=event["version"],
+            olympiad_id=olympiad_id,
+            is_admin=True,
+            tab_id=request.headers.get("X-Tab-Id", ""),
+            event_status="finished",
+            podium=podium,
+        )
+
+    response = HTMLResponse(html_content)
+    response.headers.update(extra_headers)
 
     if result == dep.Status.SUCCESS:
         conn.commit()
@@ -2094,6 +2118,180 @@ async def event_sse(request: Request, event_id: int, tab_id: str = Query("")):
 # Private helpers
 # ---------------------------------------------------------------------------
 
+def _podium_from_ranked(ranked, score_key):
+    """Build a podium dict from a list of dicts already sorted best-first.
+
+    Returns None if fewer than 2 participants have a score, or if 1st and 2nd
+    are tied (indistinguishable winner).
+    """
+    scored = [r for r in ranked if r[score_key] is not None]
+    if len(scored) < 2:
+        return None
+    if scored[0][score_key] == scored[1][score_key]:
+        return None  # tie at the top — no clear winner
+    third = scored[2]["name"] if len(scored) > 2 else None
+    return {"first": scored[0]["name"], "second": scored[1]["name"], "third": third}
+
+
+def _get_podium_bracket(conn, stage_id: int):
+    """Podium from a single-elimination bracket stage."""
+    third_place_row = conn.execute(
+        "SELECT DISTINCT bm.loser_next_match_id "
+        "FROM groups g "
+        "JOIN matches m ON m.group_id = g.id "
+        "JOIN bracket_matches bm ON bm.match_id = m.id "
+        "WHERE g.event_stage_id = ? AND bm.loser_next_match_id IS NOT NULL",
+        (stage_id,)
+    ).fetchone()
+    third_place_id = third_place_row["loser_next_match_id"] if third_place_row else None
+
+    final_row = conn.execute(
+        "SELECT m.id "
+        "FROM groups g "
+        "JOIN matches m ON m.group_id = g.id "
+        "JOIN bracket_matches bm ON bm.match_id = m.id "
+        "WHERE g.event_stage_id = ? AND bm.winner_next_match_id IS NULL AND m.id != ?",
+        (stage_id, third_place_id if third_place_id is not None else -1)
+    ).fetchone()
+    if not final_row:
+        return None
+
+    def get_match_result(match_id):
+        return conn.execute(
+            "SELECT mp.participant_id, COALESCE(pl.name, t.name) AS name, mps.score "
+            "FROM match_participants mp "
+            "JOIN participants p ON p.id = mp.participant_id "
+            "LEFT JOIN players pl ON pl.id = p.player_id "
+            "LEFT JOIN teams t ON t.id = p.team_id "
+            "LEFT JOIN match_participant_scores mps "
+            "  ON mps.match_id = mp.match_id AND mps.participant_id = mp.participant_id "
+            "WHERE mp.match_id = ?",
+            (match_id,)
+        ).fetchall()
+
+    final_parts = get_match_result(final_row["id"])
+    if len(final_parts) < 2:
+        return None
+
+    p1, p2 = final_parts[0], final_parts[1]
+    winner_id = determine_bracket_winner(p1["participant_id"], p1["score"], p2["participant_id"], p2["score"])
+    if winner_id is None:
+        return None
+
+    first  = p1["name"] if p1["participant_id"] == winner_id else p2["name"]
+    second = p2["name"] if p1["participant_id"] == winner_id else p1["name"]
+
+    third = None
+    if third_place_id is not None:
+        tp_parts = get_match_result(third_place_id)
+        if len(tp_parts) == 2:
+            tp1, tp2 = tp_parts[0], tp_parts[1]
+            tp_winner_id = determine_bracket_winner(tp1["participant_id"], tp1["score"], tp2["participant_id"], tp2["score"])
+            if tp_winner_id is not None:
+                third = tp1["name"] if tp1["participant_id"] == tp_winner_id else tp2["name"]
+
+    return {"first": first, "second": second, "third": third}
+
+
+def _get_podium_individual_score(conn, stage_id: int):
+    """Podium from a single individual-score group (pool, match_size=0)."""
+    group = conn.execute(
+        "SELECT id FROM groups WHERE event_stage_id = ?", (stage_id,)
+    ).fetchone()
+    if not group:
+        return None
+
+    match_row = conn.execute(
+        "SELECT id FROM matches WHERE group_id = ? LIMIT 1", (group["id"],)
+    ).fetchone()
+
+    rows = conn.execute(
+        "SELECT COALESCE(pl.name, t.name) AS name, mps.score "
+        "FROM group_participants gp "
+        "JOIN participants p ON p.id = gp.participant_id "
+        "LEFT JOIN players pl ON pl.id = p.player_id "
+        "LEFT JOIN teams t ON t.id = p.team_id "
+        "LEFT JOIN match_participant_scores mps "
+        "  ON mps.match_id = ? AND mps.participant_id = gp.participant_id "
+        "WHERE gp.group_id = ?",
+        (match_row["id"] if match_row else None, group["id"])
+    ).fetchall()
+
+    ranked = sorted(rows, key=lambda r: (r["score"] is None, -(r["score"] or 0)))
+    return _podium_from_ranked(ranked, "score")
+
+
+def _get_podium_groups(conn, stage_id: int):
+    """Podium from a single round-robin group (pool, match_size=2).
+
+    Ranks participants by their total score across all matches in the group.
+    """
+    group = conn.execute(
+        "SELECT id FROM groups WHERE event_stage_id = ?", (stage_id,)
+    ).fetchone()
+    if not group:
+        return None
+    gid = group["id"]
+
+    rows = conn.execute(
+        "SELECT gp.participant_id, COALESCE(pl.name, t.name) AS name, "
+        "  SUM(mps.score) AS total_score "
+        "FROM group_participants gp "
+        "JOIN participants p ON p.id = gp.participant_id "
+        "LEFT JOIN players pl ON pl.id = p.player_id "
+        "LEFT JOIN teams t ON t.id = p.team_id "
+        "LEFT JOIN match_participants mp ON mp.participant_id = gp.participant_id "
+        "LEFT JOIN matches m ON m.id = mp.match_id AND m.group_id = ? "
+        "LEFT JOIN match_participant_scores mps "
+        "  ON mps.match_id = mp.match_id AND mps.participant_id = gp.participant_id "
+        "WHERE gp.group_id = ? "
+        "GROUP BY gp.participant_id",
+        (gid, gid)
+    ).fetchall()
+
+    ranked = sorted(rows, key=lambda r: (r["total_score"] is None, -(r["total_score"] or 0)))
+    return _podium_from_ranked(ranked, "total_score")
+
+
+def _get_podium(conn, event_id: int):
+    """Return {"first": name, "second": name, "third": name|None} for the
+    last stage of the event, or None if the data is not available.
+
+    Supported last-stage kinds:
+      - single_elimination (bracket, match_size=2): from final + third-place match
+      - individual_score   (pool,    match_size=0): ranked by score, single group only
+      - groups             (pool,    match_size=2): ranked by total score, single group only
+    """
+    last_stage = conn.execute(
+        "SELECT id, advancement_mechanism, match_size "
+        "FROM event_stages WHERE event_id = ? ORDER BY stage_order DESC LIMIT 1",
+        (event_id,)
+    ).fetchone()
+    if not last_stage:
+        return None
+
+    stage_id = last_stage["id"]
+    am = last_stage["advancement_mechanism"]
+    ms = last_stage["match_size"]
+
+    if am == "bracket" and ms == 2:
+        return _get_podium_bracket(conn, stage_id)
+
+    # Pool stages only support a podium when there is exactly one group
+    num_groups = conn.execute(
+        "SELECT COUNT(*) FROM groups WHERE event_stage_id = ?", (stage_id,)
+    ).fetchone()[0]
+    if num_groups != 1:
+        return None
+
+    if am == "pool" and ms == 0:
+        return _get_podium_individual_score(conn, stage_id)
+    if am == "pool" and ms == 2:
+        return _get_podium_groups(conn, stage_id)
+
+    return None
+
+
 def _get_event_ctx(
     conn, event_id: int, olympiad_id: int, score_kind: str, current_stage_order: int
 ) -> dict:
@@ -2161,6 +2359,11 @@ def _get_event_ctx(
         if stage is not None:
             stage["name"] = stage_label
             ctx.update(stage=stage, stage_kind=stage_kind, stage_order=stage_order, total_stages=total_stages)
+
+    if ctx.get("event_status") == "finished":
+        ctx["podium"] = _get_podium(conn, event_id)
+    else:
+        ctx["podium"] = None
 
     return ctx
 
