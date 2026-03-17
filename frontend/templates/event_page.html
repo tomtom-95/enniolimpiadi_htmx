@@ -122,6 +122,14 @@
                             Renders a card per stage with kind selector and (for
                             groups stages) a num-groups +/- control.
                         #}
+                        {#
+                            TODO: when the card is closed but an admin modifies a score the card reopen
+                                  (probably because when stages-update event arrive stages-section gets called
+                                   and the rendering of event_page.html from scratch causes to see all the cards open
+                                        "dep.render_event_fragment("stages_setup_section", event_id=event_id, stages=stages)""
+                                   )
+                                   must fix
+                        #}
                         {% block stages_setup_section %}
                             <div id="stages-setup-section"
                                  hx-trigger="sse:stages-update"
