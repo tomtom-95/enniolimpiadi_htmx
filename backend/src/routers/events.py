@@ -866,7 +866,15 @@ def populate_next_stage_from_groups(conn, stage_id: int) -> bool:
 
 @router.get("")
 def list_events(request: Request):
-    return dep._list_entities(request, "events")
+    conn = request.state.conn
+    olympiad_id = dep.get_olympiad_from_request(request)["id"]
+    items = conn.execute(
+        "SELECT id, name, version FROM events WHERE olympiad_id = ?", (olympiad_id,)
+    ).fetchall()
+    html_content = dep.render_entity_fragment(
+        "entity_list", entities="events", placeholder="Aggiungi un nuovo evento", items=items
+    )
+    return HTMLResponse(html_content)
 
 
 @router.post("")
@@ -879,7 +887,7 @@ def create_event(request: Request, name: str = Form(...)):
     conn.execute("BEGIN IMMEDIATE")
 
     result = dep.Status.SUCCESS
-    if result == dep.Status.SUCCESS and dep.check_entity_name_duplication(request, olympiad_id, "events", 0, name):
+    if dep.check_entity_name_duplication(request, olympiad_id, "events", 0, name):
         result = dep.Status.NAME_DUPLICATION
     if result == dep.Status.SUCCESS and not dep.check_user_authorized(request, olympiad_id):
         result = dep.Status.NOT_AUTHORIZED
@@ -931,12 +939,72 @@ def cancel_edit_events(request: Request, event_id: int, name: str = Query(...)):
 
 @router.put("/{event_id}")
 def rename_events(request: Request, event_id: int, curr_name: str = Form(...), new_name: str = Form(...)):
-    return dep._rename_entity(request, "events", event_id, curr_name, new_name)
+    conn = request.state.conn
+    olympiad_id = dep.get_olympiad_from_request(request)["id"]
+
+    conn.execute("BEGIN IMMEDIATE")
+
+    result = dep.Status.SUCCESS
+    if dep.check_entity_name_duplication(request, olympiad_id, "events", 0, new_name):
+        result = dep.Status.NAME_DUPLICATION
+    if result == dep.Status.SUCCESS and not dep.check_user_authorized(request, olympiad_id):
+        result = dep.Status.NOT_AUTHORIZED
+
+    html_content, extra_headers = dep._render_operation_denied(result, olympiad_id, "events")
+
+    if result == dep.Status.SUCCESS:
+        updated_row = conn.execute(
+            "UPDATE events SET name = ?, version = version + 1 WHERE id = ? RETURNING id, name, version",
+            (new_name, event_id)
+        ).fetchone()
+        item = {"id": event_id, "name": updated_row["name"], "version": updated_row["version"]}
+        html_content = dep.templates.env.get_template("entity_macros.html").module.entity_element(item, "events")
+
+    response = HTMLResponse(html_content)
+    response.headers.update(extra_headers)
+
+    if result == dep.Status.SUCCESS:
+        conn.commit()
+        dep.notify_event(event_id, "event-renamed")
+        dep.notify_olympiad_page(olympiad_id, "event-renamed", exclude_tab_id=request.headers.get("X-Tab-Id", ""))
+    else:
+        conn.rollback()
+
+    return response
 
 
 @router.delete("/{event_id}")
 def delete_events(request: Request, event_id: int, entity_name: str = Query(..., alias="name")):
-    return dep._delete_entity(request, "events", event_id, entity_name)
+    conn = request.state.conn
+
+    olympiad_badge_ctx = dep.get_olympiad_from_request(request)
+    olympiad_id = olympiad_badge_ctx["id"]
+
+    conn.execute("BEGIN IMMEDIATE")
+
+    result = dep.Status.SUCCESS
+    if not dep.check_user_authorized(request, olympiad_id):
+        result = dep.Status.NOT_AUTHORIZED
+
+    html_content, extra_headers = dep._render_operation_denied(result, olympiad_id, "events")
+
+    if result == dep.Status.SUCCESS:
+        conn.execute("DELETE FROM events WHERE id = ?", (event_id,))
+        html_content = dep.templates.get_template("entity_delete.html").render()
+
+    html_content += dep._oob_badge_html(request, olympiad_id)
+    response = HTMLResponse(html_content)
+    response.headers.update(extra_headers)
+
+    if result == dep.Status.SUCCESS:
+        conn.commit()
+        dep.notify_event(event_id, "event-deleted")
+        dep._event_subscribers.pop(event_id, None)
+        dep.notify_olympiad_page(olympiad_id, "event-deleted", exclude_tab_id=request.headers.get("X-Tab-Id", ""))
+    else:
+        conn.rollback()
+
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -1028,6 +1096,14 @@ def finish_event(request: Request, event_id: int):
     max_stage_order = dep.query_get_event_max_stage_order(conn, event_id)
 
     conn.execute("BEGIN IMMEDIATE")
+
+    # When the event is finished I want to show statistics about the tournament
+    # First of all: 1st, 2nd and 3rd place
+    # I do not need to go in _set_event_stage_order
+    # the only thing I really need from that function is updating in the db teh stage_order to max_stage_order + 1
+    # but then is loaded with other meaning that I do not like
+    # the only thing I really need is to render the event_page.html with ctx["event_status"] = "finished"
+    # so that the right block of the @event_page is rendered
 
     result, response = _set_event_stage_order(request, event_id, new_stage_order=max_stage_order + 1)
 
@@ -1926,11 +2002,10 @@ async def update_individual_score(
     result = dep.Status.SUCCESS
     if not dep.check_user_authorized(request, olympiad_id):
         result = dep.Status.NOT_AUTHORIZED
-
-    extra_headers = {}
+    
+    html_content, extra_headers = dep._render_operation_denied(result, olympiad_id, "events")
 
     if result == dep.Status.NOT_AUTHORIZED:
-        extra_headers["HX-Pin-Required"] = "true"
         html_content = dep.templates.get_template("pin_modal.html").render(olympiad_id=olympiad_id)
 
     if result == dep.Status.SUCCESS:
@@ -2019,7 +2094,9 @@ async def event_sse(request: Request, event_id: int, tab_id: str = Query("")):
 # Private helpers
 # ---------------------------------------------------------------------------
 
-def _get_event_ctx(conn, event_id: int, olympiad_id: int, score_kind: str, current_stage_order: int) -> dict:
+def _get_event_ctx(
+    conn, event_id: int, olympiad_id: int, score_kind: str, current_stage_order: int
+) -> dict:
     ctx = {}
 
     max_stage_order = dep.query_get_event_max_stage_order(conn, event_id)
@@ -2077,7 +2154,7 @@ def _get_event_ctx(conn, event_id: int, olympiad_id: int, score_kind: str, curre
         elif stage_kind == "individual_score":
             stage = present_individual_score_stage(conn, stage_id)
         elif stage_kind == "single_elimination":
-            stage = present_single_elimination_stage(conn, stage_id)
+            stage = present_single_elimination_stage(conn, stage_id, view_round=0)
         else:
             stage = None
 

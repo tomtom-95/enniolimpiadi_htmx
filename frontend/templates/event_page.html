@@ -38,8 +38,7 @@
             ------------------------------------------------------------
         #}
         {% block event_status_controls %}
-            <div id="event-status-controls"
-                 {% if oob %}hx-swap-oob="true"{% endif %}>
+            <div id="event-status-controls" {% if oob %}hx-swap-oob="true"{% endif %}>
                 <div class="event-phase-bar">
                     <div class="event-phase-steps">
                         {# Compute CSS classes and dot labels for each step based on current status #}

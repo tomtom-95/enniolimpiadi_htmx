@@ -12,7 +12,6 @@
                 hx-patch="/api/events/{{ event_id }}/stages/{{ stage_id }}"
                 hx-vals='{"advancement_mechanism": "{{ sk.advancement_mechanism }}", "match_size": "{{ sk.match_size }}"}'
                 hx-target="#stages-setup-section"
-                hx-swap="outerHTML"
-                _="on htmx:afterRequest if event.detail.xhr.getResponseHeader('HX-Pin-Required') is null trigger closeStageKindEdit">{{ sk.label }}</button>
+                hx-swap="outerHTML">{{ sk.label }}</button>
     {% endfor %}
 </div>

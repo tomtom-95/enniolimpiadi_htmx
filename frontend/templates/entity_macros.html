@@ -1,3 +1,5 @@
+{% macro num_players_label_oob(count) %}<span id="num-players-label" class="stages-setup-summary-label" hx-swap-oob="true">Giocatori ({{ count }})</span>{% endmacro %}
+
 {% macro entity_element(item, entities) %}
     <div id="{{ entities }}-{{ item.id }}"
          class="entity-element"

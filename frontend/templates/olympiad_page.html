@@ -48,22 +48,20 @@
                 <input type="text" name="name" placeholder="Nuovo evento" required>
                 <button type="submit">+</button>
             </form>
-            {% block olympiad_events_list %}
-                {% from "entity_macros.html" import entity_element %}
-                {% if not events %}
-                    <div class="olympiad-page-empty">Nessun evento</div>
-                {% else %}
+            <div id="olympiad-events-list-items">
+                {% block olympiad_events_list %}
+                    {% from "entity_macros.html" import entity_element %}
                     {% for event in events %}
                         {{ entity_element(event, "events") }}
                     {% endfor %}
-                {% endif %}
-            {% endblock %}
+                {% endblock %}
+            </div>
         </div>
     </details>
 
     <details class="stages-setup-details" open>
         <summary class="stages-setup-summary">
-            <span class="stages-setup-summary-label">Giocatori ({{ players | length }})</span>
+            <span id="num-players-label" class="stages-setup-summary-label">Giocatori ({{ players | length }})</span>
         </summary>
         <div id="olympiad-players-list" class="olympiad-page-section-body">
             <form class="entity-form"
@@ -73,16 +71,14 @@
                 <input type="text" name="name" placeholder="Nuovo giocatore" required>
                 <button type="submit">+</button>
             </form>
-            {% block olympiad_players_list %}
-                {% from "entity_macros.html" import entity_element %}
-                {% if not players %}
-                    <div class="olympiad-page-empty">Nessun giocatore</div>
-                {% else %}
+            <div id="olympiad-players-list-items">
+                {% block olympiad_players_list %}
+                    {% from "entity_macros.html" import entity_element %}
                     {% for player in players %}
                         {{ entity_element(player, "players") }}
                     {% endfor %}
-                {% endif %}
-            {% endblock %}
+                {% endblock %}
+            </div>
         </div>
     </details>
 

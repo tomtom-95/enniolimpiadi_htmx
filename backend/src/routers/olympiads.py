@@ -259,13 +259,14 @@ def rename_olympiad(
 
     if result == dep.Status.OLYMPIAD_RENAMED:
         olympiad_badge_ctx = {"id": olympiad_id, "name": olympiad["name"], "version": olympiad["version"]}
-        html_content = dep.render_entity_fragment("entity_renamed_oob", entities="olympiads", item=olympiad_badge_ctx)
+        html_content = dep.render_entity_fragment(
+            "entity_renamed_oob", entities="olympiads", item=olympiad_badge_ctx
+        )
 
     if result == dep.Status.NOT_AUTHORIZED:
-        extra_headers["HX-Pin-Required"] = "true"
         extra_headers["HX-Retarget"] = "#modal-container"
         extra_headers["HX-Reswap"] = "innerHTML"
-        html_content = dep.templates.get_template("pin_modal.html").render(olympiad_id=olympiad_id)
+        html_content = dep.render_modal_fragment("not_authorized")
 
     if result == dep.Status.NAME_DUPLICATION:
         extra_headers["HX-Retarget"] = "#modal-container"
@@ -317,10 +318,9 @@ def delete_olympiad(request: Request, olympiad_id: int, olympiad_name: str = Que
         olympiad_badge_ctx = {"id": olympiad_id, "name": olympiad["name"], "version": olympiad["version"]}
         html_content = dep.render_entity_fragment("entity_renamed_oob", entities="olympiads", item=olympiad_badge_ctx)
     elif result == dep.Status.NOT_AUTHORIZED:
-        extra_headers["HX-Pin-Required"] = "true"
         extra_headers["HX-Retarget"] = "#modal-container"
         extra_headers["HX-Reswap"] = "innerHTML"
-        html_content = dep.templates.get_template("pin_modal.html").render(olympiad_id=olympiad_id)
+        html_content = dep.render_modal_fragment("not_authorized")
     else:
         conn.execute(
             "DELETE FROM olympiads WHERE id = ? AND name = ? RETURNING id",
